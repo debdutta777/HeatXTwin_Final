@@ -2,6 +2,16 @@
 
 **Complete redesign** with professional UI, multiple optimized charts, and real-time parameter editing.
 
+## 📥 Quick Download
+
+**[Download Latest Release (v1.0.0) - Windows x64](https://github.com/debdutta777/HeatXTwin_Final/releases/latest)**
+
+Ready-to-run executable with all dependencies included. No installation required - just extract and run!
+
+See [releases/README.md](releases/README.md) for detailed installation instructions.
+
+---
+
 ## ✨ Features
 
 ### 🎨 Modern Interface

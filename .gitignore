@@ -52,6 +52,10 @@ cmake_install.cmake
 Makefile
 build/
 
+# Release packages (upload these to GitHub Releases instead)
+releases/*.zip
+releases/HeatXTwin_v*
+
 # Other IDEs
 .idea/
 *.iml
