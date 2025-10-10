@@ -6,10 +6,15 @@
 
 #### For Windows (64-bit)
 
+**⚠️ IMPORTANT: Download BOTH files**
+
 **Quick Start:**
-1. Download the latest release package: `HeatXTwin_v1.0.0_Windows_x64.zip`
-2. Extract the ZIP file to your desired location
-3. Run `HeatXTwin_Pro.exe`
+1. Download the Core package: `HeatXTwin_v1.0.0_Core.zip` (~15 MB)
+2. Download the Data package: `HeatXTwin_v1.0.0_Data.zip` (~12 MB)
+3. Extract **BOTH** ZIP files to the **SAME** folder
+4. Run `HeatXTwin_Pro.exe`
+
+> **Note:** Both files are required. The application splits the package to meet GitHub's file size limits.
 
 **System Requirements:**
 - Windows 10/11 (64-bit)

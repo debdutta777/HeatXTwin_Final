@@ -33,10 +33,17 @@ A complete Heat Exchanger Digital Twin simulation tool with modern Qt6 interface
 - ✅ Live parameter adjustment
 - ✅ Professional tabbed interface
 
-### 📥 Installation
-1. Download `HeatXTwin_v1.0.0_Windows_x64.zip` below
-2. Extract to any folder
-3. Run `HeatXTwin_Pro.exe`
+### 📥 Installation (IMPORTANT: Download BOTH files)
+
+**Step 1:** Download both files below:
+- `HeatXTwin_v1.0.0_Core.zip` (~15 MB)
+- `HeatXTwin_v1.0.0_Data.zip` (~12 MB)
+
+**Step 2:** Extract BOTH files to the SAME folder
+
+**Step 3:** Run `HeatXTwin_Pro.exe`
+
+⚠️ **Note:** Both files are required. The application will not run without the data file.
 
 ### 📋 System Requirements
 - Windows 10/11 (64-bit)
@@ -53,11 +60,13 @@ None reported yet. Please open an issue if you encounter any problems.
 Developed as a Major Project - Heat Exchanger Digital Twin Simulation
 ```
 
-### 4. Upload the Release Package
+### 4. Upload the Release Packages
 
 Click "Attach binaries by dropping them here or selecting them"
 
-Upload: `releases\HeatXTwin_v1.0.0_Windows_x64.zip`
+Upload BOTH files:
+1. `releases\HeatXTwin_v1.0.0_Core.zip` (15 MB)
+2. `releases\HeatXTwin_v1.0.0_Data.zip` (12 MB)
 
 ### 5. Options
 
@@ -88,7 +97,11 @@ Users can now download the executable directly from the main README link!
 
 ---
 
-**Current Package Location:**
-`C:\Users\DEBDUTTA\Desktop\MAJOR PROJECT\HeatXTwin_Final\releases\HeatXTwin_v1.0.0_Windows_x64.zip`
+**Current Package Locations:**
+- Core: `C:\Users\DEBDUTTA\Desktop\MAJOR PROJECT\HeatXTwin_Final\releases\HeatXTwin_v1.0.0_Core.zip`
+- Data: `C:\Users\DEBDUTTA\Desktop\MAJOR PROJECT\HeatXTwin_Final\releases\HeatXTwin_v1.0.0_Data.zip`
 
-**Package Size:** ~27 MB
+**Package Sizes:** 
+- Core: ~15 MB
+- Data: ~12 MB
+- Total: ~27 MB (split into 2 files to meet GitHub's 25 MB limit)
