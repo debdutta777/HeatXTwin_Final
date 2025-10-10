@@ -1,0 +1,43 @@
+[geometry]
+nTubes = 100
+Di = 0.019
+Do = 0.025
+L = 5.0
+pitch = 0.032
+shellID = 0.5
+baffleSpacing = 0.25
+baffleCutFrac = 0.25
+nBaffles = 20
+wall_k = 16.0
+wall_thickness = 0.002
+
+[hot]
+rho = 997.0
+mu = 0.001
+cp = 4180.0
+k = 0.6
+
+[cold]
+rho = 997.0
+mu = 0.001
+cp = 4180.0
+k = 0.6
+
+[operating]
+m_dot_hot = 1.2
+m_dot_cold = 1.0
+Tin_hot = 80.0
+Tin_cold = 25.0
+
+[fouling]
+Rf0 = 0.0
+RfMax = 0.0005
+alpha = 1e-7
+tau = 1800.0
+model = "Asymptotic"
+
+[limits]
+dP_tube_max = 100000.0
+dP_shell_max = 100000.0
+m_dot_cold_min = 0.1
+m_dot_cold_max = 5.0

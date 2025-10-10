@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "heatxtwin-final",
+  "version-string": "2.0.0",
+  "dependencies": [
+    "eigen3",
+    "fmt",
+    "spdlog",
+    "tomlplusplus",
+    { "name": "qtbase", "default-features": true },
+    { "name": "qtcharts", "default-features": true }
+  ],
+  "builtin-baseline": "62efe42f53b1886a20cbeb22ee9a27736d20f149"
+}

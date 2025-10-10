@@ -1,0 +1,89 @@
+# Qt/C++ build artifacts
+*.obj
+*.o
+*.so
+*.dll
+*.exe
+*.a
+*.lib
+*.pdb
+*.user
+*.moc
+*.qrc
+*.rcc
+*.ncb
+*.suo
+*.sdf
+*.ipch
+*.aps
+*.pch
+*.idb
+*.class
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*.db
+*.sqlite
+*.out
+*.app
+*.dSYM/
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+*.qtc
+*.qtc.*
+
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.vcxproj.filters
+*.vcxproj.*.user
+*.sln.docstates
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+build/
+
+# Other IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# OS generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Backup and temp files
+*~
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Generated files
+moc_*
+ui_*
+qrc_*
+
+# Logs
+*.log
+
+# Python (if any)
+__pycache__/
+*.pyc
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Node.js (if any)
+node_modules/
