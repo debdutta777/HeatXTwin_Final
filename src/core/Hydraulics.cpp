@@ -38,16 +38,37 @@ double Hydraulics::dP_tube(double m_dot_cold, double Rf_tube) const {
 }
 
 double Hydraulics::dP_shell(double m_dot_hot, double Rf_shell) const {
-  // Approximate shell-side as channel flow with equivalent diameter
+  // Enhanced shell-side model with more realistic flow distribution
+  // Account for cross-flow effects and baffle window resistance
   const double De = std::max(1e-6, g_.shellID - g_.Do);
-  const double As = (PI * g_.shellID * g_.baffleSpacing);
+  
+  // Shell-side flow area (accounting for tube bundle blockage)
+  const double bundle_blockage = 0.35; // ~35% of shell area blocked by tubes
+  const double As = (PI * g_.shellID * g_.shellID / 4.0) * (1.0 - bundle_blockage);
   const double v = (m_dot_hot / hot_.rho) / std::max(As, 1e-12);
   const double Re = hot_.rho * v * De / std::max(hot_.mu, 1e-12);
-  const double f = friction_factor(Re) * (1.0 + 5.0 * std::max(0.0, Rf_shell) / 1e-4); // fouling ups friction
+  
+  // Enhanced friction factor with baffle effects
+  double f = friction_factor(Re);
+  
+  // Baffle window and cross-flow losses add significant resistance
+  const double baffle_factor = 1.5 + (g_.nBaffles / 20.0); // More baffles = more resistance
+  f *= baffle_factor;
+  
+  // Fouling increases friction significantly
+  f *= (1.0 + 8.0 * std::max(0.0, Rf_shell) / 1e-4);
+  
+  // Effective length with all baffle compartments
   const double Leq = g_.nBaffles * std::max(g_.baffleSpacing, 1e-6);
   const double dp_fric = f * (Leq / De) * 0.5 * hot_.rho * v * v;
-  const double K_turns = 2.0 * g_.nBaffles * 0.2; // window/turn losses
-  const double dp_minor = K_turns * 0.5 * hot_.rho * v * v;
+  
+  // Enhanced minor losses: window transitions, flow reversals, entrance/exit
+  const double K_window = 1.2 * g_.nBaffles; // Window/turn losses at each baffle
+  const double K_reversal = 0.8 * g_.nBaffles; // Flow reversal losses
+  const double K_entrance_exit = 2.5; // Shell nozzle losses
+  const double K_total = K_window + K_reversal + K_entrance_exit;
+  const double dp_minor = K_total * 0.5 * hot_.rho * v * v;
+  
   return std::max(0.0, dp_fric + dp_minor);
 }
 
