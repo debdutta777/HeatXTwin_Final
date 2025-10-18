@@ -8,7 +8,9 @@
 #include <QLabel>
 #include <QComboBox>
 #include <QThread>
+#include <QString>
 #include <memory>
+#include <vector>
 
 #include "core/Thermo.hpp"
 #include "core/Hydraulics.hpp"
@@ -17,6 +19,7 @@
 
 class ChartWidget;
 class SimWorker;
+class QGroupBox;
 
 /**
  * @brief Modern redesigned main window with tabbed charts and full UI parameter editing
@@ -34,6 +37,13 @@ public:
   explicit MainWindow(QWidget *parent = nullptr);
   ~MainWindow() override;
 
+  enum class SimulationMode {
+    SteadyClean = 0,
+    SteadyFouling = 1,
+    DynamicClean = 2,
+    DynamicFouling = 3
+  };
+
 private slots:
   void onStart();
   void onStop();
@@ -46,6 +56,7 @@ private slots:
   void onParameterChanged();
   void onSimulationSample(double t, const hx::State& state);
   void onSimulationFinished();
+  void onSimulationModeChanged(int index);
 
 private:
   void setupUi();
@@ -55,6 +66,8 @@ private:
   void applyModernStyle();
   void updateSimulationCore();
   void resetToDefaults();
+  void applySimulationModeToUi();
+  static QString simulationModeLabel(SimulationMode mode);
 
   // === TOP BAR CONTROLS ===
   QPushButton *btnStart_{};
@@ -69,6 +82,7 @@ private:
   QDoubleSpinBox *spnDuration_{};
   QDoubleSpinBox *spnTimeStep_{};
   QComboBox *cmbSpeed_{};
+  QComboBox *cmbSimulationMode_{};
 
   // === OPERATING PARAMETERS (LEFT PANEL) ===
   QDoubleSpinBox *spnHotFlowRate_{};
@@ -107,6 +121,7 @@ private:
   QDoubleSpinBox *spnTau_{};
   QDoubleSpinBox *spnAlpha_{};
   QComboBox *cmbFoulingModel_{};
+  QGroupBox *grpFouling_{};
 
   // === LIMITS ===
   QDoubleSpinBox *spnMaxTubePressureDrop_{};
@@ -135,8 +150,10 @@ private:
   // === BACKGROUND SIMULATION ===
   QThread *simThread_{};
   SimWorker *simWorker_{};
+  SimulationMode simulationMode_{SimulationMode::DynamicFouling};
   
   bool isRunning_{false};
   bool isPaused_{false};
   std::vector<std::pair<double, hx::State>> simulationData_;  // For export
 };
+

@@ -19,6 +19,31 @@
 #include <QFrame>
 #include <QTextStream>
 #include <QFile>
+#include <QSignalBlocker>
+#include <QString>
+#include <algorithm>
+
+namespace {
+struct ModeConfig {
+  bool steady;
+  bool fouling;
+};
+
+ModeConfig modeConfig(MainWindow::SimulationMode mode) {
+  using Mode = MainWindow::SimulationMode;
+  switch (mode) {
+    case Mode::SteadyClean:
+      return {true, false};
+    case Mode::SteadyFouling:
+      return {true, true};
+    case Mode::DynamicClean:
+      return {false, false};
+    case Mode::DynamicFouling:
+    default:
+      return {false, true};
+  }
+}
+}
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   setWindowTitle("HeatXTwin Pro - Modern Heat Exchanger Digital Twin");
@@ -26,6 +51,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   
   resetToDefaults();  // Initialize with default values
   setupUi();
+  applySimulationModeToUi();
   applyModernStyle();
   updateSimulationCore();
   
@@ -119,19 +145,19 @@ QWidget* MainWindow::createTopBar() {
   topBar->setMinimumHeight(65);
   topBar->setMaximumHeight(70);
   topBar->setStyleSheet(R"(
-    QWidget { 
+    QWidget {
       background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                   stop:0 #f8f9fa, stop:1 #e9ecef);
       border-bottom: 3px solid #3498db;
     }
   )");
-  
+
   auto *layout = new QHBoxLayout(topBar);
   layout->setSpacing(10);
   layout->setContentsMargins(10, 10, 10, 10);
 
   // === SIMULATION CONTROL BUTTONS ===
-  btnStart_ = new QPushButton("▶ START", this);
+  btnStart_ = new QPushButton("Start", this);
   btnStart_->setObjectName("startButton");
   btnStart_->setMinimumSize(95, 45);
   btnStart_->setMaximumSize(115, 45);
@@ -140,7 +166,7 @@ QWidget* MainWindow::createTopBar() {
   connect(btnStart_, &QPushButton::clicked, this, &MainWindow::onStart);
   layout->addWidget(btnStart_);
 
-  btnPause_ = new QPushButton("⏸ PAUSE", this);
+  btnPause_ = new QPushButton("Pause", this);
   btnPause_->setObjectName("pauseButton");
   btnPause_->setMinimumSize(95, 45);
   btnPause_->setMaximumSize(115, 45);
@@ -150,7 +176,7 @@ QWidget* MainWindow::createTopBar() {
   connect(btnPause_, &QPushButton::clicked, this, &MainWindow::onPause);
   layout->addWidget(btnPause_);
 
-  btnStop_ = new QPushButton("■ STOP", this);
+  btnStop_ = new QPushButton("Stop", this);
   btnStop_->setObjectName("stopButton");
   btnStop_->setMinimumSize(95, 45);
   btnStop_->setMaximumSize(115, 45);
@@ -160,7 +186,7 @@ QWidget* MainWindow::createTopBar() {
   connect(btnStop_, &QPushButton::clicked, this, &MainWindow::onStop);
   layout->addWidget(btnStop_);
 
-  btnReset_ = new QPushButton("🔄 RESET", this);
+  btnReset_ = new QPushButton("Reset", this);
   btnReset_->setMinimumSize(85, 45);
   btnReset_->setMaximumSize(105, 45);
   btnReset_->setToolTip("Reset to default parameters");
@@ -175,19 +201,19 @@ QWidget* MainWindow::createTopBar() {
   layout->addWidget(line1);
 
   // === CHART CONTROL BUTTONS ===
-  btnZoomIn_ = new QPushButton("�+ Zoom In", this);
+  btnZoomIn_ = new QPushButton("Zoom In", this);
   btnZoomIn_->setMinimumSize(90, 38);
   btnZoomIn_->setToolTip("Zoom in on chart");
   connect(btnZoomIn_, &QPushButton::clicked, this, &MainWindow::onZoomIn);
   layout->addWidget(btnZoomIn_);
 
-  btnZoomOut_ = new QPushButton("�- Zoom Out", this);
+  btnZoomOut_ = new QPushButton("Zoom Out", this);
   btnZoomOut_->setMinimumSize(90, 38);
   btnZoomOut_->setToolTip("Zoom out on chart");
   connect(btnZoomOut_, &QPushButton::clicked, this, &MainWindow::onZoomOut);
   layout->addWidget(btnZoomOut_);
 
-  btnZoomReset_ = new QPushButton("🔍↺ Reset", this);
+  btnZoomReset_ = new QPushButton("Reset Zoom", this);
   btnZoomReset_->setMinimumSize(90, 38);
   btnZoomReset_->setToolTip("Reset zoom to fit all data");
   connect(btnZoomReset_, &QPushButton::clicked, this, &MainWindow::onZoomReset);
@@ -200,7 +226,7 @@ QWidget* MainWindow::createTopBar() {
   layout->addWidget(line2);
 
   // === EXPORT BUTTON ===
-  btnExport_ = new QPushButton("💾 Export CSV", this);
+  btnExport_ = new QPushButton("Export CSV", this);
   btnExport_->setMinimumSize(100, 38);
   btnExport_->setEnabled(false);
   btnExport_->setToolTip("Export simulation data to CSV");
@@ -229,27 +255,38 @@ QWidget* MainWindow::createTopBar() {
 
   layout->addWidget(new QLabel("Speed:", this));
   cmbSpeed_ = new QComboBox(this);
-  cmbSpeed_->addItem("1× (Real-time)", 1);
-  cmbSpeed_->addItem("2× (2x faster)", 2);
-  cmbSpeed_->addItem("5× (5x faster)", 5);
-  cmbSpeed_->addItem("10× (10x faster)", 10);
-  cmbSpeed_->addItem("20× (20x faster)", 20);
-  cmbSpeed_->addItem("50× (50x faster)", 50);
-  cmbSpeed_->addItem("100× (100x faster)", 100);
+  cmbSpeed_->addItem("1x (real-time)", 1);
+  cmbSpeed_->addItem("2x (double speed)", 2);
+  cmbSpeed_->addItem("5x", 5);
+  cmbSpeed_->addItem("10x", 10);
+  cmbSpeed_->addItem("20x", 20);
+  cmbSpeed_->addItem("50x", 50);
+  cmbSpeed_->addItem("100x", 100);
   cmbSpeed_->setCurrentIndex(0);
   cmbSpeed_->setMinimumWidth(130);
-  cmbSpeed_->setToolTip("Simulation speed multiplier\n1× = Real-time (1800s takes 30 min)\n100× = Fast (1800s takes 18 sec)");
+  cmbSpeed_->setToolTip("Simulation speed multiplier\n1x = real-time (1800 s takes 30 min)\n100x = fast (1800 s takes 18 s)");
   layout->addWidget(cmbSpeed_);
 
+  layout->addWidget(new QLabel("Simulation:", this));
+  cmbSimulationMode_ = new QComboBox(this);
+  cmbSimulationMode_->addItem("Steady Clean (no fouling)");
+  cmbSimulationMode_->addItem("Steady with Fouling");
+  cmbSimulationMode_->addItem("Dynamic Clean (disturbances)");
+  cmbSimulationMode_->addItem("Dynamic with Fouling");
+  cmbSimulationMode_->setMinimumWidth(220);
+  cmbSimulationMode_->setToolTip("Select preset behaviour for fouling and inlet disturbances.");
+  cmbSimulationMode_->setCurrentIndex(static_cast<int>(simulationMode_));
+  connect(cmbSimulationMode_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, &MainWindow::onSimulationModeChanged);
+  layout->addWidget(cmbSimulationMode_);
+
   layout->addWidget(new QLabel("Status:", this));
-  lblStatus_ = new QLabel("● Ready", this);
+  lblStatus_ = new QLabel("Ready", this);
   lblStatus_->setStyleSheet("color: #27ae60; font-weight: bold; font-size: 10pt;");
   layout->addWidget(lblStatus_);
 
   return topBar;
-}
-
-QWidget* MainWindow::createLeftPanel() {
+}QWidget* MainWindow::createLeftPanel() {
   auto *panel = new QWidget(this);
   auto *layout = new QVBoxLayout(panel);
   layout->setSpacing(4);
@@ -488,8 +525,8 @@ QWidget* MainWindow::createLeftPanel() {
   layout->addWidget(grpGeometry);
 
   // === FOULING ===
-  auto *grpFouling = new QGroupBox("⚙️ Fouling Model", this);
-  auto *formFoul = new QFormLayout(grpFouling);
+  grpFouling_ = new QGroupBox("Fouling Model", this);
+  auto *formFoul = new QFormLayout(grpFouling_);
   formFoul->setSpacing(5);
   formFoul->setContentsMargins(8, 8, 8, 8);
   formFoul->setHorizontalSpacing(10);
@@ -542,7 +579,7 @@ QWidget* MainWindow::createLeftPanel() {
           this, &MainWindow::onParameterChanged);
   formFoul->addRow("Fouling Model:", cmbFoulingModel_);
 
-  layout->addWidget(grpFouling);
+  layout->addWidget(grpFouling_);
 
   // === LIMITS ===
   auto *grpLimits = new QGroupBox("⚠️ Operating Limits", this);
@@ -919,6 +956,13 @@ void MainWindow::onStart() {
   // Create simulator
   auto simulator = std::make_unique<hx::Simulator>(*thermo_, *hydro_, *fouling_, simConfig_);
   simulator->reset(op_);
+  
+  // Apply simulation mode
+  simulationMode_ = static_cast<SimulationMode>(std::clamp(cmbSimulationMode_->currentIndex(), 0, 3));
+  applySimulationModeToUi();
+  const ModeConfig cfg = modeConfig(simulationMode_);
+  simulator->setSteadyStateMode(cfg.steady);
+  simulator->setFoulingEnabled(cfg.fouling);
 
   // Create worker and thread
   simThread_ = new QThread(this);
@@ -928,6 +972,7 @@ void MainWindow::onStart() {
   // Set speed multiplier from combo box
   int speedMultiplier = cmbSpeed_->currentData().toInt();
   simWorker_->setSpeedMultiplier(speedMultiplier);
+  
   
   simWorker_->moveToThread(simThread_);
 
@@ -944,7 +989,7 @@ void MainWindow::onStart() {
   btnStop_->setEnabled(true);
   btnExport_->setEnabled(false);
   isPaused_ = false;
-  lblStatus_->setText("● Running");
+  lblStatus_->setText("Running");
   lblStatus_->setStyleSheet("color: #e67e22; font-weight: bold; font-size: 10pt;");
   isRunning_ = true;
 
@@ -999,8 +1044,8 @@ void MainWindow::onReset() {
   }
 
   resetToDefaults();
-  
-  // Update UI
+
+  // Update UI inputs to defaults
   spnHotFlowRate_->setValue(op_.m_dot_hot);
   spnColdFlowRate_->setValue(op_.m_dot_cold);
   spnHotInletTemp_->setValue(op_.Tin_hot);
@@ -1016,8 +1061,9 @@ void MainWindow::onReset() {
   spnDuration_->setValue(simConfig_.tEnd);
   spnTimeStep_->setValue(simConfig_.dt);
 
+  applySimulationModeToUi();
   updateSimulationCore();
-  
+
   // Clear charts
   chartTemp_->clear();
   chartHeat_->clear();
@@ -1035,16 +1081,16 @@ void MainWindow::onPause() {
   if (isPaused_) {
     // Pause simulation
     simWorker_->stop();  // Stop temporarily
-    btnPause_->setText("▶ RESUME");
+    btnPause_->setText("Resume");
     btnPause_->setStyleSheet("background: #27ae60; color: white;");
-    lblStatus_->setText("⏸ Paused");
+    lblStatus_->setText("Paused");
     lblStatus_->setStyleSheet("color: #f39c12; font-weight: bold; font-size: 10pt;");
     statusBar()->showMessage("Simulation paused");
   } else {
     // Resume simulation
-    btnPause_->setText("⏸ PAUSE");
+    btnPause_->setText("Pause");
     btnPause_->setStyleSheet("");  // Reset to default
-    lblStatus_->setText("● Running");
+    lblStatus_->setText("Running");
     lblStatus_->setStyleSheet("color: #e67e22; font-weight: bold; font-size: 10pt;");
     statusBar()->showMessage("Simulation resumed");
     // Note: Full resume would require more complex state management
@@ -1116,4 +1162,50 @@ void MainWindow::onExportData() {
                           QString("Simulation data exported to:\n%1\n\n%2 data points saved.")
                           .arg(filename).arg(simulationData_.size()));
 }
+
+QString MainWindow::simulationModeLabel(SimulationMode mode) {
+  switch (mode) {
+    case SimulationMode::SteadyClean:
+      return QStringLiteral("Steady Clean (no fouling)");
+    case SimulationMode::SteadyFouling:
+      return QStringLiteral("Steady with Fouling");
+    case SimulationMode::DynamicClean:
+      return QStringLiteral("Dynamic Clean (disturbances)");
+    case SimulationMode::DynamicFouling:
+    default:
+      return QStringLiteral("Dynamic with Fouling");
+  }
+}
+
+void MainWindow::applySimulationModeToUi() {
+  if (cmbSimulationMode_) {
+    QSignalBlocker blocker(cmbSimulationMode_);
+    cmbSimulationMode_->setCurrentIndex(static_cast<int>(simulationMode_));
+  }
+
+  const ModeConfig cfg = modeConfig(simulationMode_);
+
+  if (grpFouling_) {
+    const QString title = cfg.fouling
+                             ? QStringLiteral("Fouling Model")
+                             : QStringLiteral("Fouling Model (disabled)");
+    grpFouling_->setTitle(title);
+    grpFouling_->setEnabled(cfg.fouling);
+    grpFouling_->setToolTip(cfg.fouling ? QString() : QStringLiteral("Fouling is disabled in this preset."));
+  }
+}
+
+void MainWindow::onSimulationModeChanged(int index) {
+  const int clamped = std::clamp(index, 0, 3);
+  simulationMode_ = static_cast<SimulationMode>(clamped);
+  applySimulationModeToUi();
+
+  const QString modeName = simulationModeLabel(simulationMode_);
+  if (isRunning_) {
+    statusBar()->showMessage(QStringLiteral("Mode will apply on next start: %1").arg(modeName), 5000);
+  } else {
+    statusBar()->showMessage(QStringLiteral("Simulation mode set to %1").arg(modeName), 4000);
+  }
+}
+
 

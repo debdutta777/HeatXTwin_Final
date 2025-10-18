@@ -20,6 +20,8 @@ public:
   void reset(const OperatingPoint &op0);
   [[nodiscard]] const State &step(double t);
   void updateOperatingPoint(const OperatingPoint &newOp) { op_ = newOp; }
+  void setSteadyStateMode(bool enabled);
+  void setFoulingEnabled(bool enabled);
 
   template <class F>
   void run(const OperatingPoint & /*schedule*/, F onSample) {
@@ -40,6 +42,8 @@ private:
   SimConfig cfg_;
   OperatingPoint op_{};
   State state_{};
+  bool steadyStateMode_{false};  // true = no disturbances, false = dynamic with disturbances
+  bool foulingEnabled_{true};
 };
 
 } // namespace hx

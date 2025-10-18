@@ -1,5 +1,19 @@
-// Modified Simulator.cpp - For Steady State Comparison
-// Replace the step() function with this version
+// ============================================================================
+// REFERENCE FILE - NOT FOR COMPILATION
+// ============================================================================
+// This is a REFERENCE showing how to modify src/core/Simulator.cpp
+// DO NOT compile this file directly - it will show errors
+//
+// TO USE:
+// 1. Open src/core/Simulator.cpp
+// 2. Find the step() function (around line 25)
+// 3. Replace ONLY the step() function body with code from this file
+// 4. Choose which disturbance level you want (see options below)
+// 5. Rebuild: cmake --build build --config Release
+// ============================================================================
+
+// This is ONLY the step() function body - not a complete file!
+// Copy this function INTO src/core/Simulator.cpp
 
 const State &Simulator::step(double t) {
   // Dynamic fouling resistance with time lag

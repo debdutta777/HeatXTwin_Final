@@ -222,3 +222,11 @@ For issues or questions about the simulation models, refer to source code docume
 **Version**: 2.0  
 **Last Updated**: 2024  
 **Status**: Production Ready ✅
+
+### Simulation Mode Presets (New)
+- Steady Clean (no fouling): steady flows with fouling disabled and smooth outputs
+- Steady with Fouling: steady profiles with fouling growth enabled
+- Dynamic Clean: inlet disturbances without fouling buildup
+- Dynamic with Fouling: disturbances plus fouling growth (default)
+
+Use the toolbar combo box to switch modes instantly while configuring a run.
