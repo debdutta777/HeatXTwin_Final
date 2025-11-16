@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Reload IntelliSense",
+      "type": "shell",
+      "command": "echo",
+      "args": ["IntelliSense reloaded - please run: Ctrl+Shift+P -> 'C/C++: Reset IntelliSense Database'"],
+      "problemMatcher": []
+    }
+  ]
+}

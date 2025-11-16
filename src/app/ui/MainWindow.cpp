@@ -142,8 +142,8 @@ void MainWindow::setupUi() {
 
 QWidget* MainWindow::createTopBar() {
   auto *topBar = new QWidget(this);
-  topBar->setMinimumHeight(65);
-  topBar->setMaximumHeight(70);
+  topBar->setMinimumHeight(110);
+  topBar->setMaximumHeight(115);
   topBar->setStyleSheet(R"(
     QWidget {
       background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -152,11 +152,22 @@ QWidget* MainWindow::createTopBar() {
     }
   )");
 
-  auto *layout = new QHBoxLayout(topBar);
-  layout->setSpacing(10);
-  layout->setContentsMargins(10, 10, 10, 10);
+  auto *mainLayout = new QVBoxLayout(topBar);
+  mainLayout->setSpacing(5);
+  mainLayout->setContentsMargins(10, 5, 10, 5);
 
-  // === SIMULATION CONTROL BUTTONS ===
+  // First row - Control buttons and chart controls
+  auto *row1Layout = new QHBoxLayout();
+  row1Layout->setSpacing(10);
+
+  // Second row - Parameters
+  auto *row2Layout = new QHBoxLayout();
+  row2Layout->setSpacing(10);
+
+  mainLayout->addLayout(row1Layout);
+  mainLayout->addLayout(row2Layout);
+
+  // === SIMULATION CONTROL BUTTONS === (Row 1)
   btnStart_ = new QPushButton("Start", this);
   btnStart_->setObjectName("startButton");
   btnStart_->setMinimumSize(95, 45);
@@ -164,7 +175,7 @@ QWidget* MainWindow::createTopBar() {
   btnStart_->setToolTip("Start simulation");
   btnStart_->setStyleSheet("font-size: 11pt; font-weight: bold; background-color: #27ae60; color: white;");
   connect(btnStart_, &QPushButton::clicked, this, &MainWindow::onStart);
-  layout->addWidget(btnStart_);
+  row1Layout->addWidget(btnStart_);
 
   btnPause_ = new QPushButton("Pause", this);
   btnPause_->setObjectName("pauseButton");
@@ -174,7 +185,7 @@ QWidget* MainWindow::createTopBar() {
   btnPause_->setToolTip("Pause/Resume simulation");
   btnPause_->setStyleSheet("font-size: 11pt; font-weight: bold; background-color: #f39c12; color: white;");
   connect(btnPause_, &QPushButton::clicked, this, &MainWindow::onPause);
-  layout->addWidget(btnPause_);
+  row1Layout->addWidget(btnPause_);
 
   btnStop_ = new QPushButton("Stop", this);
   btnStop_->setObjectName("stopButton");
@@ -184,7 +195,7 @@ QWidget* MainWindow::createTopBar() {
   btnStop_->setToolTip("Stop simulation");
   btnStop_->setStyleSheet("font-size: 11pt; font-weight: bold; background-color: #e74c3c; color: white;");
   connect(btnStop_, &QPushButton::clicked, this, &MainWindow::onStop);
-  layout->addWidget(btnStop_);
+  row1Layout->addWidget(btnStop_);
 
   btnReset_ = new QPushButton("Reset", this);
   btnReset_->setMinimumSize(85, 45);
@@ -192,68 +203,68 @@ QWidget* MainWindow::createTopBar() {
   btnReset_->setToolTip("Reset to default parameters");
   btnReset_->setStyleSheet("font-size: 10pt; font-weight: bold;");
   connect(btnReset_, &QPushButton::clicked, this, &MainWindow::onReset);
-  layout->addWidget(btnReset_);
+  row1Layout->addWidget(btnReset_);
 
   // Separator
   auto *line1 = new QFrame(this);
   line1->setFrameShape(QFrame::VLine);
   line1->setFrameShadow(QFrame::Sunken);
-  layout->addWidget(line1);
+  row1Layout->addWidget(line1);
 
-  // === CHART CONTROL BUTTONS ===
+  // === CHART CONTROL BUTTONS === (Row 1)
   btnZoomIn_ = new QPushButton("Zoom In", this);
   btnZoomIn_->setMinimumSize(90, 38);
   btnZoomIn_->setToolTip("Zoom in on chart");
   connect(btnZoomIn_, &QPushButton::clicked, this, &MainWindow::onZoomIn);
-  layout->addWidget(btnZoomIn_);
+  row1Layout->addWidget(btnZoomIn_);
 
   btnZoomOut_ = new QPushButton("Zoom Out", this);
   btnZoomOut_->setMinimumSize(90, 38);
   btnZoomOut_->setToolTip("Zoom out on chart");
   connect(btnZoomOut_, &QPushButton::clicked, this, &MainWindow::onZoomOut);
-  layout->addWidget(btnZoomOut_);
+  row1Layout->addWidget(btnZoomOut_);
 
   btnZoomReset_ = new QPushButton("Reset Zoom", this);
   btnZoomReset_->setMinimumSize(90, 38);
   btnZoomReset_->setToolTip("Reset zoom to fit all data");
   connect(btnZoomReset_, &QPushButton::clicked, this, &MainWindow::onZoomReset);
-  layout->addWidget(btnZoomReset_);
+  row1Layout->addWidget(btnZoomReset_);
 
   // Separator
   auto *line2 = new QFrame(this);
   line2->setFrameShape(QFrame::VLine);
   line2->setFrameShadow(QFrame::Sunken);
-  layout->addWidget(line2);
+  row1Layout->addWidget(line2);
 
-  // === EXPORT BUTTON ===
+  // === EXPORT BUTTON === (Row 1)
   btnExport_ = new QPushButton("Export CSV", this);
   btnExport_->setMinimumSize(100, 38);
   btnExport_->setEnabled(false);
   btnExport_->setToolTip("Export simulation data to CSV");
   connect(btnExport_, &QPushButton::clicked, this, &MainWindow::onExportData);
-  layout->addWidget(btnExport_);
+  row1Layout->addWidget(btnExport_);
 
-  layout->addStretch();
+  row1Layout->addStretch();
 
-  // === SIMULATION PARAMETERS ===
-  layout->addWidget(new QLabel("Duration:", this));
+  // === SIMULATION PARAMETERS === (Row 2)
+  row2Layout->addWidget(new QLabel("Duration:", this));
   spnDuration_ = new QDoubleSpinBox(this);
   spnDuration_->setRange(100, 10000);
   spnDuration_->setValue(1800);
   spnDuration_->setSuffix(" s");
   spnDuration_->setMinimumWidth(100);
-  layout->addWidget(spnDuration_);
+  row2Layout->addWidget(spnDuration_);
 
-  layout->addWidget(new QLabel("Time Step:", this));
+  row2Layout->addWidget(new QLabel("Time Step:", this));
   spnTimeStep_ = new QDoubleSpinBox(this);
   spnTimeStep_->setRange(0.1, 10.0);
   spnTimeStep_->setValue(2.0);
   spnTimeStep_->setSingleStep(0.1);
   spnTimeStep_->setSuffix(" s");
   spnTimeStep_->setMinimumWidth(100);
-  layout->addWidget(spnTimeStep_);
+  row2Layout->addWidget(spnTimeStep_);
 
-  layout->addWidget(new QLabel("Speed:", this));
+  row2Layout->addWidget(new QLabel("Speed:", this));
   cmbSpeed_ = new QComboBox(this);
   cmbSpeed_->addItem("1x (real-time)", 1);
   cmbSpeed_->addItem("2x (double speed)", 2);
@@ -265,9 +276,9 @@ QWidget* MainWindow::createTopBar() {
   cmbSpeed_->setCurrentIndex(0);
   cmbSpeed_->setMinimumWidth(130);
   cmbSpeed_->setToolTip("Simulation speed multiplier\n1x = real-time (1800 s takes 30 min)\n100x = fast (1800 s takes 18 s)");
-  layout->addWidget(cmbSpeed_);
+  row2Layout->addWidget(cmbSpeed_);
 
-  layout->addWidget(new QLabel("Simulation:", this));
+  row2Layout->addWidget(new QLabel("Simulation:", this));
   cmbSimulationMode_ = new QComboBox(this);
   cmbSimulationMode_->addItem("Steady Clean (no fouling)");
   cmbSimulationMode_->addItem("Steady with Fouling");
@@ -278,12 +289,14 @@ QWidget* MainWindow::createTopBar() {
   cmbSimulationMode_->setCurrentIndex(static_cast<int>(simulationMode_));
   connect(cmbSimulationMode_, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &MainWindow::onSimulationModeChanged);
-  layout->addWidget(cmbSimulationMode_);
+  row2Layout->addWidget(cmbSimulationMode_);
 
-  layout->addWidget(new QLabel("Status:", this));
+  row2Layout->addWidget(new QLabel("Status:", this));
   lblStatus_ = new QLabel("Ready", this);
   lblStatus_->setStyleSheet("color: #27ae60; font-weight: bold; font-size: 10pt;");
-  layout->addWidget(lblStatus_);
+  row2Layout->addWidget(lblStatus_);
+
+  row2Layout->addStretch();
 
   return topBar;
 }QWidget* MainWindow::createLeftPanel() {
