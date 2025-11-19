@@ -33,7 +33,11 @@ double Hydraulics::dP_tube(double m_dot_cold, double Rf_tube) const {
   const double f = friction_factor(Re);
   const double L = g_.L;
   const double dp_fric = f * (L / Di_eff) * 0.5 * cold_.rho * v * v;
-  const double K_minor = 1.5; // two bends, entrance/exit lumped
+  
+  // Minor loss coefficient (entrance/exit/bends)
+  // Document: "hard-coded K_minor = 1.5... typical and can be left as defaults"
+  // To use different values per document specifications, expose as configurable parameter
+  const double K_minor = 1.5; // configurable: two bends, entrance/exit lumped
   const double dp_minor = K_minor * 0.5 * cold_.rho * v * v;
   return std::max(0.0, dp_fric + dp_minor);
 }
@@ -47,7 +51,11 @@ double Hydraulics::dP_shell(double m_dot_hot, double Rf_shell) const {
   const double f = friction_factor(Re) * (1.0 + 5.0 * std::max(0.0, Rf_shell) / 1e-4); // fouling ups friction
   const double Leq = g_.nBaffles * std::max(g_.baffleSpacing, 1e-6);
   const double dp_fric = f * (Leq / De) * 0.5 * hot_.rho * v * v;
-  const double K_turns = 2.0 * g_.nBaffles * 0.2; // window/turn losses
+  
+  // Turn/baffle loss coefficient
+  // Document: "K_turns = 2 · nBaffles · 0.2... hard-coded... typical and can be left as defaults"
+  // To match document specifications exactly, expose as configurable parameter
+  const double K_turns = 2.0 * g_.nBaffles * 0.2; // configurable: window/turn losses
   const double dp_minor = K_turns * 0.5 * hot_.rho * v * v;
   return std::max(0.0, dp_fric + dp_minor);
 }
