@@ -36,17 +36,19 @@ double Thermo::h_tube(double m_dot_cold) const {
 
 double Thermo::h_shell(double m_dot_hot) const {
   // Zhukauskas tube-bank correlation for shell-side cross-flow
-  const double De = g_.shellID - g_.Do; // crude gap estimate
+  // Note: For dynamic simulation with fouling, effective diameter should be passed
+  // Here we use the clean geometry; fouling effects handled in overall U calculation
+  const double De = g_.shellID - g_.Do; // crude gap estimate (clean)
   const double As = (PI * g_.shellID * g_.baffleSpacing); // cross-flow area per baffle pitch (very rough)
   const double v = (m_dot_hot / hot_.rho) / std::max(As, 1e-6);
   const double Re = hot_.rho * v * std::max(De, 1e-6) / hot_.mu;
   const double Pr = prandtl(hot_.cp, hot_.mu, hot_.k);
   
   // Zhukauskas correlation: Nu = C * Re^m * Pr^n * (Pr/Pr_w)^0.25
-  // For typical range, using C=0.27, m=0.63, n=0.36
+  // For typical range, using C=0.27, m=0.63, n=0.37 (upper range value)
   const double C = 0.27;
   const double m = 0.63;
-  const double n = 0.36; // Updated from 0.33 to match Zhukauskas correlation
+  const double n = 0.37; // Using 0.37 per document (n ≈ 0.36-0.37)
   
   // Assume Pr_w ≈ Pr for simplicity (viscosity correction term)
   // In full implementation, would evaluate properties at wall temperature
@@ -56,10 +58,47 @@ double Thermo::h_shell(double m_dot_hot) const {
   return Nu * hot_.k / std::max(De, 1e-6);
 }
 
+// Helper function to compute effective shell-side equivalent diameter with fouling
+double Thermo::De_effective(double Rf_shell) const {
+  // Convert fouling resistance to deposit thickness
+  const double k_deposit = 0.5; // W/m/K (typical for water-side deposits)
+  const double delta_shell = Rf_shell * k_deposit;
+  
+  // Adjust equivalent diameter: De_eff = (shellID - 2*delta_shell) - Do
+  // Fouling on tube exterior reduces the effective gap
+  const double De_clean = g_.shellID - g_.Do;
+  const double De_eff = std::max(1e-6, De_clean - 2.0 * delta_shell);
+  return De_eff;
+}
+
+double Thermo::h_shell_with_fouling(double m_dot_hot, double Rf_shell) const {
+  // Zhukauskas tube-bank correlation with effective diameter for fouling
+  const double De_eff = De_effective(Rf_shell);
+  const double As = (PI * g_.shellID * g_.baffleSpacing);
+  const double v = (m_dot_hot / hot_.rho) / std::max(As, 1e-6);
+  const double Re = hot_.rho * v * De_eff / hot_.mu;
+  const double Pr = prandtl(hot_.cp, hot_.mu, hot_.k);
+  
+  const double C = 0.27;
+  const double m = 0.63;
+  const double n = 0.37;
+  const double Pr_ratio = 1.0;
+  
+  const double Nu = C * std::pow(std::max(Re, 1.0), m) * std::pow(Pr, n) * Pr_ratio;
+  return Nu * hot_.k / De_eff;
+}
+
 double Thermo::U(double m_dot_hot, double m_dot_cold, double Rf_shell, double Rf_tube) const {
   const double ht = std::max(h_tube(m_dot_cold), 1.0);
-  const double hs = std::max(h_shell(m_dot_hot), 1.0);
-  const double Rw = g_.wall_thickness / std::max(g_.wall_k, 1e-9);
+  
+  // Use fouling-aware shell-side coefficient if fouling is present
+  const double hs = (Rf_shell > 1e-9) ? std::max(h_shell_with_fouling(m_dot_hot, Rf_shell), 1.0) 
+                                       : std::max(h_shell(m_dot_hot), 1.0);
+  
+  // Cylindrical wall resistance: R_wall = ln(Do/Di) / (2*pi*k_wall*L*N_tubes)
+  // Per unit outer area: R_wall = ln(Do/Di) / (2*pi*k_wall*L*N_tubes) * (N_tubes*pi*Do*L)
+  //                              = ln(Do/Di) * Do / (2*k_wall*Di)
+  const double Rw = std::log(g_.Do / std::max(g_.Di, 1e-9)) * g_.Do / (2.0 * std::max(g_.wall_k, 1e-9) * g_.Di);
   
   // Standard series resistance network (no empirical correction factor)
   // 1/U = 1/h_shell + R_wall + (1/h_tube)*(Di/Do) + Rf_shell + Rf_tube

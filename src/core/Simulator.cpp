@@ -39,11 +39,10 @@ const State &Simulator::step(double t) {
   double Rf_tube = 0.0;
 
   if (foulingEnabled_) {
-    // Dynamic fouling resistance with time lag
-    const double Rf_target = foul_.Rf(t);
-    // Fouling builds up slowly (time constant: 10 minutes)
-    state_.Rf += (Rf_target - state_.Rf) * (dt / 600.0);
-    state_.Rf = std::clamp(state_.Rf, 0.0, 0.01); // Max 0.01 mA�K/W fouling
+    // Direct calculation of fouling resistance at time t (no lag)
+    // Use the fouling model to compute Rf(t) directly
+    state_.Rf = foul_.Rf(t);
+    state_.Rf = std::max(0.0, std::min(state_.Rf, 0.01)); // Max 0.01 m²K/W fouling
     Rf_shell = state_.Rf * 0.5;
     Rf_tube = state_.Rf * 0.5;
   } else {

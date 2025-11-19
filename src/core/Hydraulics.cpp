@@ -16,8 +16,9 @@ static double friction_factor(double Re) {
     return 1.0; // degenerate
   if (Re < 2300.0)
     return 64.0 / std::max(Re, 1.0);
-  // Blasius for smooth turbulent
-  return 0.316 * std::pow(Re, -0.25);
+  // Blasius correlation for smooth turbulent flow: f = 0.3164 * Re^-0.25
+  // Valid for 4000 < Re < 10^5
+  return 0.3164 * std::pow(Re, -0.25);
 }
 
 double Hydraulics::dP_tube(double m_dot_cold, double Rf_tube) const {

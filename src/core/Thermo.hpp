@@ -23,6 +23,19 @@ public:
    */
   [[nodiscard]] double h_shell(double m_dot_hot) const;
 
+  /** Shell-side convective coefficient with effective diameter accounting for fouling.
+   *  @param m_dot_hot Hot-side mass flow [kg/s]
+   *  @param Rf_shell Shell-side fouling resistance [m²K/W]
+   *  @return h_s [W/m^2/K]
+   */
+  [[nodiscard]] double h_shell_with_fouling(double m_dot_hot, double Rf_shell) const;
+
+  /** Compute effective shell-side equivalent diameter with fouling deposit thickness.
+   *  @param Rf_shell Shell-side fouling resistance [m²K/W]
+   *  @return De_eff [m]
+   */
+  [[nodiscard]] double De_effective(double Rf_shell) const;
+
   /** Overall U based on outer area.
    *  1/U = 1/h_s + R_w + (1/h_t)*(Di/Do) + Rf_s + Rf_t
    */
