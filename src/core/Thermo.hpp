@@ -33,6 +33,11 @@ public:
    */
   [[nodiscard]] State steady(const OperatingPoint &op, double Rf_shell, double Rf_tube) const;
 
+  /** Accessor methods for dynamic simulation */
+  [[nodiscard]] const Geometry& geometry() const { return g_; }
+  [[nodiscard]] const Fluid& hot() const { return hot_; }
+  [[nodiscard]] const Fluid& cold() const { return cold_; }
+
 private:
   Geometry g_;
   Fluid hot_;

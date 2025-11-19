@@ -27,22 +27,32 @@ double Thermo::h_tube(double m_dot_cold) const {
   if (Re < 2300.0) {
     Nu = 4.36; // constant wall temperature
   } else {
-    Nu = 0.023 * std::pow(Re, 0.8) * std::pow(Pr, 0.3);
+    // Dittus-Boelter: n=0.4 for heating (fluid being heated), n=0.3 for cooling
+    // Tube side (cold fluid) is being heated, so use n=0.4
+    Nu = 0.023 * std::pow(Re, 0.8) * std::pow(Pr, 0.4);
   }
   return Nu * cold_.k / g_.Di;
 }
 
 double Thermo::h_shell(double m_dot_hot) const {
-  // Very simple Kern-like: use equivalent diameter approx and cross-flow area
+  // Zhukauskas tube-bank correlation for shell-side cross-flow
   const double De = g_.shellID - g_.Do; // crude gap estimate
   const double As = (PI * g_.shellID * g_.baffleSpacing); // cross-flow area per baffle pitch (very rough)
   const double v = (m_dot_hot / hot_.rho) / std::max(As, 1e-6);
   const double Re = hot_.rho * v * std::max(De, 1e-6) / hot_.mu;
   const double Pr = prandtl(hot_.cp, hot_.mu, hot_.k);
-  const double C = 0.27; // placeholder constants
+  
+  // Zhukauskas correlation: Nu = C * Re^m * Pr^n * (Pr/Pr_w)^0.25
+  // For typical range, using C=0.27, m=0.63, n=0.36
+  const double C = 0.27;
   const double m = 0.63;
-  const double n = 0.33;
-  const double Nu = C * std::pow(std::max(Re, 1.0), m) * std::pow(Pr, n);
+  const double n = 0.36; // Updated from 0.33 to match Zhukauskas correlation
+  
+  // Assume Pr_w ≈ Pr for simplicity (viscosity correction term)
+  // In full implementation, would evaluate properties at wall temperature
+  const double Pr_ratio = 1.0; // (Pr/Pr_w)^0.25 ≈ 1.0 for similar temperatures
+  
+  const double Nu = C * std::pow(std::max(Re, 1.0), m) * std::pow(Pr, n) * Pr_ratio;
   return Nu * hot_.k / std::max(De, 1e-6);
 }
 
@@ -50,11 +60,12 @@ double Thermo::U(double m_dot_hot, double m_dot_cold, double Rf_shell, double Rf
   const double ht = std::max(h_tube(m_dot_cold), 1.0);
   const double hs = std::max(h_shell(m_dot_hot), 1.0);
   const double Rw = g_.wall_thickness / std::max(g_.wall_k, 1e-9);
+  
+  // Standard series resistance network (no empirical correction factor)
+  // 1/U = 1/h_shell + R_wall + (1/h_tube)*(Di/Do) + Rf_shell + Rf_tube
   const double invU = (1.0 / hs) + Rw + (1.0 / ht) * (g_.Di / g_.Do) + Rf_shell + Rf_tube;
-  // Empirical boost factor to align rough correlations with baseline acceptance targets.
-  // This keeps relative effects (fouling reduces U) while matching order-of-magnitude UA.
-  constexpr double kU = 3.2; // tuned for seed geometry/flows; replace with better shell model later
-  return kU * (1.0 / std::max(invU, 1e-9));
+  
+  return 1.0 / std::max(invU, 1e-9);
 }
 
 State Thermo::steady(const OperatingPoint &op, double Rf_shell, double Rf_tube) const {

@@ -5,11 +5,15 @@
 namespace hx {
 
 struct SimConfig {
-  double dt;    // [s]
-  double tEnd;  // [s]
+  double dt;    // [s] time step
+  double tEnd;  // [s] end time
   int cells;    // for multi-cell later
   bool multicell;
   Limits limits;
+  
+  // Dynamic simulation parameters (holdup masses for ODE integration)
+  double Mh;    // [kg] hot-side fluid holdup mass
+  double Mc;    // [kg] cold-side fluid holdup mass
 };
 
 /** \brief Simulator advances the model in time with simple first-order lags to emulate dynamics. */

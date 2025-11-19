@@ -70,25 +70,40 @@ const State &Simulator::step(double t) {
   // Compute target steady state for current conditions
   const State target = thermo_.steady(dynamic_op, Rf_shell, Rf_tube);
 
-  // Realistic thermal inertia with longer time constants
-  const double tau_temp = 120.0;  // 2-minute temperature time constant
-  const double tau_U = 180.0;     // 3-minute U coefficient time constant  
-  const double tau_Q = 90.0;      // 1.5-minute heat duty time constant
+  // Use proper dynamic energy balance ODEs instead of first-order lags
+  // Get current U and heat transfer area
+  const double Ut = thermo_.U(dynamic_op.m_dot_hot, dynamic_op.m_dot_cold, Rf_shell, Rf_tube);
+  const double A = thermo_.geometry().areaOuter();
   
-  // Temperature response with thermal mass effects - with bounds checking
-  state_.Tc_out += (target.Tc_out - state_.Tc_out) * (dt / tau_temp);
-  state_.Th_out += (target.Th_out - state_.Th_out) * (dt / tau_temp);
+  // Instantaneous heat transfer based on current outlet temperatures
+  const double Qt = Ut * A * (state_.Th_out - state_.Tc_out);
+  
+  // Heat capacity rates
+  const double Ch = dynamic_op.m_dot_hot * thermo_.hot().cp;
+  const double Cc = dynamic_op.m_dot_cold * thermo_.cold().cp;
+  
+  // Thermal capacitances (holdup mass × specific heat)
+  const double Cth_h = cfg_.Mh * thermo_.hot().cp;
+  const double Cth_c = cfg_.Mc * thermo_.cold().cp;
+  
+  // Dynamic energy balance ODEs (explicit Euler integration)
+  // Hot side: Cth_h * dTh_out/dt = m_h*cp_h*(Th_in - Th_out) - Q
+  const double dTh_dt = (Ch * (dynamic_op.Tin_hot - state_.Th_out) - Qt) / std::max(Cth_h, 1e-12);
+  
+  // Cold side: Cth_c * dTc_out/dt = m_c*cp_c*(Tc_in - Tc_out) + Q
+  const double dTc_dt = (Cc * (dynamic_op.Tin_cold - state_.Tc_out) + Qt) / std::max(Cth_c, 1e-12);
+  
+  // Update outlet temperatures
+  state_.Th_out += dTh_dt * dt;
+  state_.Tc_out += dTc_dt * dt;
   
   // Ensure reasonable temperature bounds (0-200°C)
   state_.Tc_out = std::max(0.0, std::min(200.0, state_.Tc_out));
   state_.Th_out = std::max(0.0, std::min(200.0, state_.Th_out));
   
-  // Heat transfer coefficient with fouling and flow dynamics - with bounds checking
-  state_.U += (target.U - state_.U) * (dt / tau_U);
-  state_.U = std::max(10.0, std::min(10000.0, state_.U)); // Reasonable U range
-  
-  // Heat duty with thermal lag and capacity effects - with bounds checking
-  state_.Q += (target.Q - state_.Q) * (dt / tau_Q);
+  // Update state variables
+  state_.U = Ut;
+  state_.Q = Qt;
   state_.Q = std::max(0.0, std::min(1e6, state_.Q)); // Reasonable Q range
   
   // Pressure drops respond quickly to flow changes

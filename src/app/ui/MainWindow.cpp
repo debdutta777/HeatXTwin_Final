@@ -105,6 +105,11 @@ void MainWindow::resetToDefaults() {
   // Simulation config
   simConfig_.dt = 2.0;
   simConfig_.tEnd = 1800.0;
+  
+  // Dynamic simulation parameters (holdup masses)
+  // Typical values: ~10kg hot side, ~12kg cold side for moderate exchanger
+  simConfig_.Mh = 10.0;  // [kg] hot-side fluid holdup mass
+  simConfig_.Mc = 12.0;  // [kg] cold-side fluid holdup mass
 }
 
 void MainWindow::setupUi() {
