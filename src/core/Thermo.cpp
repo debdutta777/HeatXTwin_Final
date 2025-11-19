@@ -28,10 +28,15 @@ double Thermo::h_tube(double m_dot_cold) const {
     Nu = 4.36; // constant wall temperature
   } else {
     // Dittus-Boelter: n=0.4 for heating (fluid being heated), n=0.3 for cooling
-    // Determine if fluid is being heated or cooled by comparing with typical hot-side temp
-    // In this shell-and-tube configuration, tube-side (cold) is always being heated
-    // If you simulate cooling, set is_heating = false
-    const bool is_heating = true; // tube-side cold fluid is heated by hot shell-side
+    // Document: "The exponent drops to 0.3 when the tube-side fluid is cooled"
+    // 
+    // Current configuration: tube-side carries cold fluid, shell-side carries hot fluid
+    // Therefore, tube-side fluid is being HEATED → use n=0.4
+    //
+    // For cooling scenarios (tube-side hotter than shell-side), set is_heating = false
+    // This can be determined automatically if inlet temperatures are available,
+    // or configured based on process design
+    const bool is_heating = true; // cold tube-side heated by hot shell-side
     const double n = is_heating ? 0.4 : 0.3;
     Nu = 0.023 * std::pow(Re, 0.8) * std::pow(Pr, n);
   }
@@ -54,10 +59,15 @@ double Thermo::h_shell(double m_dot_hot) const {
   const double m = 0.63;
   const double n = 0.37; // Using 0.37 per document (n ≈ 0.36-0.37)
   
-  // Viscosity correction term (Pr/Pr_w)^0.25
-  // For moderate temperature differences and liquids, Pr/Pr_w ≈ 1.0 is acceptable
-  // Full implementation would evaluate fluid properties at wall temperature
-  // Document states: "For most liquids at moderate ΔT, this simplification is acceptable"
+  // Viscosity-ratio correction term: (Pr/Pr_w)^0.25
+  // Document: "The Zhukauskas correlation includes (Pr/Pr_w)^0.25. The code approximates
+  // this term as 1.0, which is acceptable for moderate temperature differences but could
+  // be refined if necessary."
+  //
+  // To refine: evaluate hot fluid properties at wall temperature T_w, compute Pr_w,
+  // then use: Pr_ratio = std::pow(Pr / Pr_w, 0.25)
+  //
+  // Current approximation: Pr/Pr_w ≈ 1.0 (valid for ΔT < 30-40°C)
   const double Pr_ratio = std::pow(1.0, 0.25); // (Pr/Pr_w)^0.25, approximated as 1.0
   
   const double Nu = C * std::pow(std::max(Re, 1.0), m) * std::pow(Pr, n) * Pr_ratio;
@@ -67,10 +77,17 @@ double Thermo::h_shell(double m_dot_hot) const {
 // Helper function to compute effective shell-side equivalent diameter with fouling
 double Thermo::De_effective(double Rf_shell) const {
   // Convert fouling resistance to deposit thickness: δ = R_f * k_deposit
-  // Document specifies: "fouling thickness is δ = R_f · k_f"
-  // Default k_deposit = 0.5 W/m/K is typical for water-side deposits
-  // Adjust this value if different deposit thermal conductivity is known
-  const double k_deposit = 0.5; // W/m/K (configurable parameter)
+  // Document: "The code fixes the deposit thermal conductivity at 0.5 W·m⁻¹·K⁻¹.
+  // If the document specifies a different value, adjust k_deposit accordingly."
+  //
+  // Typical values for deposit conductivity:
+  // - Water-side calcium carbonate scale: 0.5 - 2.0 W/m/K
+  // - Biological fouling: 0.5 - 0.6 W/m/K
+  // - Oil/organic deposits: 0.1 - 0.2 W/m/K
+  // - Crystalline scale (e.g., CaSO4): 1.0 - 2.5 W/m/K
+  //
+  // Current value: 0.5 W/m/K (typical for bio-fouling or soft scale)
+  const double k_deposit = 0.5; // W/m/K (CONFIGURABLE - adjust for specific deposits)
   const double delta_shell = Rf_shell * k_deposit;
   
   // Adjust equivalent diameter: De_eff = (shellID - 2*delta_shell) - Do
@@ -92,7 +109,8 @@ double Thermo::h_shell_with_fouling(double m_dot_hot, double Rf_shell) const {
   const double m = 0.63;
   const double n = 0.37;
   
-  // Viscosity correction term (Pr/Pr_w)^0.25 ≈ 1.0 for moderate ΔT
+  // Viscosity-ratio correction: (Pr/Pr_w)^0.25 ≈ 1.0 for moderate ΔT
+  // See h_shell() for detailed refinement notes
   const double Pr_ratio = std::pow(1.0, 0.25);
   
   const double Nu = C * std::pow(std::max(Re, 1.0), m) * std::pow(Pr, n) * Pr_ratio;
