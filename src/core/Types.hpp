@@ -23,6 +23,10 @@ struct Geometry {
   int nBaffles;         // [-]
   double wall_k;        // wall conductivity [W/m/K]
   double wall_thickness;// wall thickness [m]
+  
+  // Hydraulic parameters
+  double K_minor_tube = 1.5;      // Tube-side minor loss coefficient
+  double K_turns_shell = 0.0;     // Shell-side turn loss coefficient (calculated if 0)
 
   [[nodiscard]] double areaOuter() const { return 3.14159265358979323846 * Do * L * nTubes; }
 };
@@ -39,6 +43,8 @@ struct FoulingParams {
   double RfMax;   // asymptotic max [m^2*K/W]
   double tau;     // time constant [s]
   double alpha;   // linear rate [m^2*K/(W*s)]
+  double k_deposit = 0.5; // deposit thermal conductivity [W/m/K]
+  double split_ratio = 0.5; // fraction of total fouling on shell side (0.0 to 1.0)
   enum class Model { Asymptotic, Linear } model;
 };
 

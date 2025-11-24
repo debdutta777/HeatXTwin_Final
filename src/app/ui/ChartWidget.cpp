@@ -212,8 +212,8 @@ void ChartWidget::setupSeries() {
     case FOULING:
       chart_->setTitle("⚙️ Fouling Resistance");
       axisY_->setTitleText("Rf×10⁴ [m²K/W × 10⁴]");
-      axisY_->setRange(0, 10);
-      minY_ = 0; maxY_ = 10;
+      axisY_->setRange(0, 20);
+      minY_ = 0; maxY_ = 100; // Allow up to 0.01 Rf
       
       series1_ = createSeries("Rf (Fouling)", QColor(52, 152, 219));           // Light Blue
       series1Name_ = "Rf";
@@ -234,7 +234,7 @@ void ChartWidget::clear() {
     case TEMPERATURE: axisY_->setRange(20, 100); break;
     case HEAT_DUTY: axisY_->setRange(0, 500); break;
     case PRESSURE: axisY_->setRange(0, 40000); break;
-    case FOULING: axisY_->setRange(0, 10); break;
+    case FOULING: axisY_->setRange(0, 20); break;
   }
   
   sampleCount_ = 0;
@@ -303,8 +303,20 @@ void ChartWidget::updateAxes(double t, const hx::State& state) {
   double range = currentMax - currentMin;
   double margin = std::max(range * 0.15, 1.0);  // At least 1 unit margin
   
+  // For fouling, ensure a minimum display range to prevent noise amplification
+  if (type_ == FOULING) {
+      margin = std::max(margin, 0.5);
+  }
+
   double newMin = std::max(minY_, currentMin - margin);
   double newMax = std::min(maxY_, currentMax + margin);
+  
+  if (type_ == FOULING) {
+      // Ensure we show at least 0-5 range (scaled) if values are small
+      if (newMax < 5.0) {
+          newMax = 5.0;
+      }
+  }
   
   // Only update if significant change
   if (std::abs(newMin - axisY_->min()) > range * 0.1 ||

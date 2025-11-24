@@ -10,10 +10,10 @@ public:
   Hydraulics(const Geometry &g, const Fluid &hot, const Fluid &cold);
 
   /** Tube-side pressure drop (Darcy–Weisbach + simple minor losses). */
-  [[nodiscard]] double dP_tube(double m_dot_cold, double Rf_tube) const;
+  [[nodiscard]] double dP_tube(double m_dot_hot, double Rf_tube, double k_deposit, double K_minor) const;
 
   /** Shell-side pressure drop (approximate cross-flow model). */
-  [[nodiscard]] double dP_shell(double m_dot_hot, double Rf_shell) const;
+  [[nodiscard]] double dP_shell(double m_dot_cold, double Rf_shell, double k_deposit, double K_turns) const;
 
 private:
   Geometry g_;

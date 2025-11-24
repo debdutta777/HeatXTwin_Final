@@ -86,6 +86,8 @@ void MainWindow::resetToDefaults() {
   geom_.nBaffles = 20;
   geom_.wall_k = 16.0;
   geom_.wall_thickness = 0.002;
+  geom_.K_minor_tube = 1.5;      // Default minor loss
+  geom_.K_turns_shell = 0.0;     // Default (calculated)
 
   // Fluid properties (water)
   hot_.rho = 997.0;
@@ -98,13 +100,16 @@ void MainWindow::resetToDefaults() {
   // Fouling parameters
   foulParams_.Rf0 = 0.0;
   foulParams_.RfMax = 0.0005;
-  foulParams_.alpha = 1e-7;
-  foulParams_.tau = 1800.0;
+  foulParams_.tau = 3600.0;
+  foulParams_.alpha = 1e-8;
   foulParams_.model = hx::FoulingParams::Model::Asymptotic;
+  foulParams_.k_deposit = 0.5; // Default conductivity
+  foulParams_.split_ratio = 0.5; // Default 50/50 split
 
   // Simulation config
-  simConfig_.dt = 2.0;
-  simConfig_.tEnd = 1800.0;
+  simConfig_.dt = 0.1;
+  simConfig_.tEnd = 3600.0;
+  simConfig_.disturbanceType = hx::SimConfig::DisturbanceType::SineWave; // Default disturbance
   
   // Dynamic simulation parameters (holdup masses)
   // Typical values: ~10kg hot side, ~12kg cold side for moderate exchanger

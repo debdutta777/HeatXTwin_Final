@@ -14,6 +14,28 @@ struct SimConfig {
   // Dynamic simulation parameters (holdup masses for ODE integration)
   double Mh;    // [kg] hot-side fluid holdup mass
   double Mc;    // [kg] cold-side fluid holdup mass
+
+  // Disturbance configuration
+  enum class DisturbanceType {
+      None,
+      SineWave,
+      StepChange,
+      Ramp
+  } disturbanceType = DisturbanceType::SineWave;
+
+  // Configurable disturbance parameters
+  double dist_sine_amp_Tin = 3.0;      // Amplitude for Tin sine wave [C]
+  double dist_sine_freq_Tin = 900.0;   // Period for Tin sine wave [s]
+  double dist_sine_amp_flow = 0.15;    // Amplitude for flow sine wave (fraction)
+  double dist_sine_freq_flow = 1500.0; // Period for flow sine wave [s]
+  
+  double dist_step_time = 300.0;       // Time for step change [s]
+  double dist_step_mag_flow = 0.1;     // Magnitude for flow step change (fraction)
+  double dist_step_mag_Tin = 5.0;      // Magnitude for Tin step change [C]
+  
+  double dist_ramp_start = 100.0;      // Ramp start time [s]
+  double dist_ramp_duration = 600.0;   // Ramp duration [s]
+  double dist_ramp_mag_flow = 0.2;     // Ramp magnitude (fraction)
 };
 
 /** \brief Simulator advances the model in time with simple first-order lags to emulate dynamics. */

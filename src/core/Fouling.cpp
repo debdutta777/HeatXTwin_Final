@@ -19,8 +19,9 @@ double Fouling::Rf(double t_seconds) const {
 }
 
 double Fouling::thickness(double Rf) const {
-  // Map Rf to deposit thickness via an effective deposit conductivity (crudely)
-  const double k_dep = 0.5; // W/m/K (placeholder)
+  // Map Rf to deposit thickness via an effective deposit conductivity
+  // Use the configured k_deposit from parameters
+  const double k_dep = std::max(p_.k_deposit, 1e-3); 
   return std::max(0.0, Rf) * k_dep;
 }
 

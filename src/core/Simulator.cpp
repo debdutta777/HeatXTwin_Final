@@ -26,7 +26,8 @@ void Simulator::setFoulingEnabled(bool enabled) {
 
 void Simulator::reset(const OperatingPoint &op0) { 
   op_ = op0; 
-  state_ = thermo_.steady(op_, 0.0, 0.0);
+  // Pass k_deposit to steady state calculation
+  state_ = thermo_.steady(op_, 0.0, 0.0, foul_.params().k_deposit);
   // Initialize with small deterministic perturbations for consistency
   state_.Tc_out += 0.1; // +0.1°C initial variation
   state_.Th_out -= 0.1; // -0.1°C initial variation
@@ -37,14 +38,18 @@ const State &Simulator::step(double t) {
 
   double Rf_shell = 0.0;
   double Rf_tube = 0.0;
+  const double k_deposit = foul_.params().k_deposit;
+  const double split_ratio = foul_.params().split_ratio;
 
   if (foulingEnabled_) {
     // Direct calculation of fouling resistance at time t (no lag)
     // Use the fouling model to compute Rf(t) directly
     state_.Rf = foul_.Rf(t);
     state_.Rf = std::max(0.0, std::min(state_.Rf, 0.01)); // Max 0.01 m²K/W fouling
-    Rf_shell = state_.Rf * 0.5;
-    Rf_tube = state_.Rf * 0.5;
+    
+    // Distribute fouling based on split_ratio
+    Rf_shell = state_.Rf * split_ratio;
+    Rf_tube = state_.Rf * (1.0 - split_ratio);
   } else {
     state_.Rf = 0.0;
   }
@@ -54,24 +59,53 @@ const State &Simulator::step(double t) {
   
   // Apply disturbances only if NOT in steady-state mode
   if (!steadyStateMode_) {
-    // More realistic temperature variations (±3°C range)
-    dynamic_op.Tin_hot += 3.0 * std::sin(2.0 * M_PI * t / 900.0) + 1.5 * std::sin(2.0 * M_PI * t / 300.0);
-    dynamic_op.Tin_cold += 2.0 * std::sin(2.0 * M_PI * t / 1200.0) + 1.0 * std::sin(2.0 * M_PI * t / 450.0);
-    
-    // Stronger flow rate variations (±15% range)
-    dynamic_op.m_dot_hot += op_.m_dot_hot * 0.15 * std::sin(2.0 * M_PI * t / 1500.0) + 
-                            op_.m_dot_hot * 0.08 * std::sin(2.0 * M_PI * t / 600.0);
-    dynamic_op.m_dot_cold += op_.m_dot_cold * 0.12 * std::sin(2.0 * M_PI * t / 1100.0) + 
-                              op_.m_dot_cold * 0.06 * std::sin(2.0 * M_PI * t / 400.0);
+    switch (cfg_.disturbanceType) {
+      case SimConfig::DisturbanceType::SineWave:
+        // Configurable sine wave disturbances
+        dynamic_op.Tin_hot += cfg_.dist_sine_amp_Tin * std::sin(2.0 * M_PI * t / cfg_.dist_sine_freq_Tin) + 
+                              (cfg_.dist_sine_amp_Tin * 0.5) * std::sin(2.0 * M_PI * t / (cfg_.dist_sine_freq_Tin / 3.0));
+        
+        dynamic_op.Tin_cold += (cfg_.dist_sine_amp_Tin * 0.66) * std::sin(2.0 * M_PI * t / (cfg_.dist_sine_freq_Tin * 1.33)) + 
+                               (cfg_.dist_sine_amp_Tin * 0.33) * std::sin(2.0 * M_PI * t / (cfg_.dist_sine_freq_Tin * 0.5));
+        
+        // Flow rate variations
+        dynamic_op.m_dot_hot += op_.m_dot_hot * cfg_.dist_sine_amp_flow * std::sin(2.0 * M_PI * t / cfg_.dist_sine_freq_flow) + 
+                                op_.m_dot_hot * (cfg_.dist_sine_amp_flow * 0.5) * std::sin(2.0 * M_PI * t / (cfg_.dist_sine_freq_flow * 0.4));
+        
+        dynamic_op.m_dot_cold += op_.m_dot_cold * (cfg_.dist_sine_amp_flow * 0.8) * std::sin(2.0 * M_PI * t / (cfg_.dist_sine_freq_flow * 0.73)) + 
+                                  op_.m_dot_cold * (cfg_.dist_sine_amp_flow * 0.4) * std::sin(2.0 * M_PI * t / (cfg_.dist_sine_freq_flow * 0.26));
+        break;
+
+      case SimConfig::DisturbanceType::StepChange:
+        // Step change
+        if (t > cfg_.dist_step_time) {
+            dynamic_op.m_dot_hot *= (1.0 + cfg_.dist_step_mag_flow);
+            dynamic_op.Tin_hot += cfg_.dist_step_mag_Tin;
+        }
+        break;
+
+      case SimConfig::DisturbanceType::Ramp:
+        // Ramp up
+        if (t > cfg_.dist_ramp_start) {
+            double ramp = std::min(1.0, (t - cfg_.dist_ramp_start) / std::max(1.0, cfg_.dist_ramp_duration));
+            dynamic_op.m_dot_hot *= (1.0 + cfg_.dist_ramp_mag_flow * ramp);
+        }
+        break;
+
+      case SimConfig::DisturbanceType::None:
+      default:
+        // No disturbances
+        break;
+    }
   }
   // else: steadyStateMode_ = true, no disturbances added, use op_ directly
   
   // Compute target steady state for current conditions
-  const State target = thermo_.steady(dynamic_op, Rf_shell, Rf_tube);
+  const State target = thermo_.steady(dynamic_op, Rf_shell, Rf_tube, k_deposit);
 
   // Use proper dynamic energy balance ODEs instead of first-order lags
   // Get current U and heat transfer area
-  const double Ut = thermo_.U(dynamic_op.m_dot_hot, dynamic_op.m_dot_cold, Rf_shell, Rf_tube);
+  const double Ut = thermo_.U(dynamic_op.m_dot_hot, dynamic_op.m_dot_cold, Rf_shell, Rf_tube, k_deposit);
   const double A = thermo_.geometry().areaOuter();
   
   // Instantaneous heat transfer based on current outlet temperatures
@@ -106,8 +140,10 @@ const State &Simulator::step(double t) {
   state_.Q = std::max(0.0, std::min(1e6, state_.Q)); // Reasonable Q range
   
   // Pressure drops respond quickly to flow changes
-  state_.dP_tube = hydro_.dP_tube(dynamic_op.m_dot_cold, Rf_tube);
-  state_.dP_shell = hydro_.dP_shell(dynamic_op.m_dot_hot, Rf_shell);
+  // Tube side is HOT fluid, Shell side is COLD fluid (per report)
+  // Pass configurable loss coefficients and deposit conductivity
+  state_.dP_tube = hydro_.dP_tube(dynamic_op.m_dot_hot, Rf_tube, k_deposit, thermo_.geometry().K_minor_tube);
+  state_.dP_shell = hydro_.dP_shell(dynamic_op.m_dot_cold, Rf_shell, k_deposit, thermo_.geometry().K_turns_shell);
   
   return state_;
 }

@@ -6,7 +6,11 @@ echo ========================================
 echo.
 
 REM Check if build exists
-if not exist "build\bin\Release\HeatXTwin_Pro.exe" (
+if exist "build\Release\HeatXTwin_Pro.exe" (
+    set "APP_DIR=build\Release"
+) else if exist "build\bin\Release\HeatXTwin_Pro.exe" (
+    set "APP_DIR=build\bin\Release"
+) else (
     echo ERROR: Application not built yet!
     echo.
     echo Please build the application first:
@@ -18,7 +22,7 @@ if not exist "build\bin\Release\HeatXTwin_Pro.exe" (
 )
 
 REM Navigate to the executable directory
-cd build\bin\Release
+cd %APP_DIR%
 
 REM Launch the application
 echo Starting HeatXTwin_Pro.exe...
