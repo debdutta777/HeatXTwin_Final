@@ -2,13 +2,34 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "heatxtwin-final",
   "version-string": "2.0.0",
+  "description": "HeatXTwin Pro - Modern Heat Exchanger Digital Twin with Fouling Simulation",
+  "homepage": "https://github.com/yourusername/heatxtwin",
+  
   "dependencies": [
     "eigen3",
     "fmt",
     "spdlog",
     "tomlplusplus",
-    { "name": "qtbase", "default-features": true },
-    { "name": "qtcharts", "default-features": true }
+    {
+      "name": "qtbase",
+      "default-features": true
+    },
+    {
+      "name": "qtcharts",
+      "default-features": true
+    },
+    {
+      "name": "qt3d",
+      "default-features": true
+    }
   ],
-  "builtin-baseline": "62efe42f53b1886a20cbeb22ee9a27736d20f149"
+  
+  "builtin-baseline": "62efe42f53b1886a20cbeb22ee9a27736d20f149",
+  
+  "overrides": [
+    {
+      "name": "eigen3",
+      "version": "3.4.0"
+    }
+  ]
 }

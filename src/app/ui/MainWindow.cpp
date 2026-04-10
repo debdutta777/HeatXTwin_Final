@@ -1,6 +1,8 @@
 #include "MainWindow.hpp"
 #include "ChartWidget.hpp"
+#include "HeatExchangerWidget.hpp"
 #include "SimWorker.hpp"
+#include "Diagnostics.hpp"
 #include "core/Simulator.hpp"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -21,6 +23,7 @@
 #include <QFile>
 #include <QSignalBlocker>
 #include <QString>
+#include <QApplication>
 #include <algorithm>
 
 namespace {
@@ -46,17 +49,53 @@ ModeConfig modeConfig(MainWindow::SimulationMode mode) {
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+  // Initialize diagnostics
+  auto diagnostics = std::make_unique<Diagnostics>();
+  
+  DIAG_BEGIN(*diagnostics, "Application Startup");
   setWindowTitle("HeatXTwin Pro - Modern Heat Exchanger Digital Twin");
   resize(1400, 900);
   
+  // Setup geometry update debouncing (300ms delay for rapid parameter changes)
+  DIAG_BEGIN(*diagnostics, "Initialize Timer");
+  geometryUpdateTimer_ = new QTimer(this);
+  geometryUpdateTimer_->setSingleShot(true);
+  geometryUpdateTimer_->setInterval(300);
+  connect(geometryUpdateTimer_, &QTimer::timeout, this, &MainWindow::onGeometryDebounceTimeout);
+  DIAG_END(*diagnostics, "Debounce timer ready");
+  
+  DIAG_BEGIN(*diagnostics, "Reset to Defaults");
   resetToDefaults();  // Initialize with default values
+  DIAG_END(*diagnostics, "Default parameters loaded");
+  
+  DIAG_BEGIN(*diagnostics, "Setup UI");
   setupUi();
+  DIAG_END(*diagnostics, "UI widgets created");
+  
+  DIAG_BEGIN(*diagnostics, "Apply Simulation Mode");
   applySimulationModeToUi();
+  DIAG_END(*diagnostics, "Simulation mode configured");
+  
+  DIAG_BEGIN(*diagnostics, "Apply Modern Style");
   applyModernStyle();
+  DIAG_END(*diagnostics, "Styling applied");
+  
+  DIAG_BEGIN(*diagnostics, "Update Simulation Core");
   updateSimulationCore();
+  DIAG_END(*diagnostics, "Core simulation objects created");
   
   // Remove margins from central widget for more space
   centralWidget()->setContentsMargins(0, 0, 0, 0);
+  
+  // Run final diagnostic checks
+  diagnostics->runAllChecks();
+  
+  // Export diagnostics
+  QString appDir = QApplication::applicationDirPath();
+  diagnostics->exportToLog(appDir + "/Startup.log");
+  diagnostics->exportToJson(appDir + "/Startup.json");
+  diagnostics->printSummary();
+  DIAG_END(*diagnostics, "Diagnostics complete");
 }
 
 MainWindow::~MainWindow() {
@@ -316,7 +355,7 @@ QWidget* MainWindow::createTopBar() {
   layout->setContentsMargins(5, 5, 5, 5);
 
   // === OPERATING CONDITIONS ===
-  auto *grpOperating = new QGroupBox("🌡️ Operating Conditions", this);
+  auto *grpOperating = new QGroupBox("Operating Conditions", this);
   auto *formOp = new QFormLayout(grpOperating);
   formOp->setSpacing(5);
   formOp->setContentsMargins(8, 8, 8, 8);
@@ -344,7 +383,7 @@ QWidget* MainWindow::createTopBar() {
   spnHotInletTemp_ = new QDoubleSpinBox(this);
   spnHotInletTemp_->setRange(40, 150);
   spnHotInletTemp_->setValue(op_.Tin_hot);
-  spnHotInletTemp_->setSuffix(" °C");
+  spnHotInletTemp_->setSuffix(" \xC2\xB0" "C");
   connect(spnHotInletTemp_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formOp->addRow("Hot Inlet Temp:", spnHotInletTemp_);
@@ -352,7 +391,7 @@ QWidget* MainWindow::createTopBar() {
   spnColdInletTemp_ = new QDoubleSpinBox(this);
   spnColdInletTemp_->setRange(5, 50);
   spnColdInletTemp_->setValue(op_.Tin_cold);
-  spnColdInletTemp_->setSuffix(" °C");
+  spnColdInletTemp_->setSuffix(" \xC2\xB0" "C");
   connect(spnColdInletTemp_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formOp->addRow("Cold Inlet Temp:", spnColdInletTemp_);
@@ -360,7 +399,7 @@ QWidget* MainWindow::createTopBar() {
   layout->addWidget(grpOperating);
 
   // === HOT FLUID PROPERTIES ===
-  auto *grpHotFluid = new QGroupBox("🔥 Hot Fluid Properties", this);
+  auto *grpHotFluid = new QGroupBox("Hot Fluid Properties", this);
   auto *formHot = new QFormLayout(grpHotFluid);
   formHot->setSpacing(5);
   formHot->setContentsMargins(8, 8, 8, 8);
@@ -370,7 +409,7 @@ QWidget* MainWindow::createTopBar() {
   spnHotDensity_ = new QDoubleSpinBox(this);
   spnHotDensity_->setRange(500, 2000);
   spnHotDensity_->setValue(hot_.rho);
-  spnHotDensity_->setSuffix(" kg/m³");
+  spnHotDensity_->setSuffix(" kg/m\xC2\xB3");
   connect(spnHotDensity_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formHot->addRow("Density (ρ):", spnHotDensity_);
@@ -380,7 +419,7 @@ QWidget* MainWindow::createTopBar() {
   spnHotViscosity_->setDecimals(5);
   spnHotViscosity_->setSingleStep(0.00001);
   spnHotViscosity_->setValue(hot_.mu);
-  spnHotViscosity_->setSuffix(" Pa·s");
+  spnHotViscosity_->setSuffix(" Pa\xC2\xB7s");
   connect(spnHotViscosity_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formHot->addRow("Viscosity (μ):", spnHotViscosity_);
@@ -388,7 +427,7 @@ QWidget* MainWindow::createTopBar() {
   spnHotSpecificHeat_ = new QDoubleSpinBox(this);
   spnHotSpecificHeat_->setRange(1000, 10000);
   spnHotSpecificHeat_->setValue(hot_.cp);
-  spnHotSpecificHeat_->setSuffix(" J/kg·K");
+  spnHotSpecificHeat_->setSuffix(" J/kg\xC2\xB7K");
   connect(spnHotSpecificHeat_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formHot->addRow("Specific Heat (cp):", spnHotSpecificHeat_);
@@ -397,7 +436,7 @@ QWidget* MainWindow::createTopBar() {
   spnHotConductivity_->setRange(0.01, 5.0);
   spnHotConductivity_->setDecimals(3);
   spnHotConductivity_->setValue(hot_.k);
-  spnHotConductivity_->setSuffix(" W/m·K");
+  spnHotConductivity_->setSuffix(" W/m\xC2\xB7K");
   connect(spnHotConductivity_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formHot->addRow("Conductivity (k):", spnHotConductivity_);
@@ -405,7 +444,7 @@ QWidget* MainWindow::createTopBar() {
   layout->addWidget(grpHotFluid);
 
   // === COLD FLUID PROPERTIES ===
-  auto *grpColdFluid = new QGroupBox("❄️ Cold Fluid Properties", this);
+  auto *grpColdFluid = new QGroupBox("Cold Fluid Properties", this);
   auto *formCold = new QFormLayout(grpColdFluid);
   formCold->setSpacing(5);
   formCold->setContentsMargins(8, 8, 8, 8);
@@ -415,7 +454,7 @@ QWidget* MainWindow::createTopBar() {
   spnColdDensity_ = new QDoubleSpinBox(this);
   spnColdDensity_->setRange(500, 2000);
   spnColdDensity_->setValue(cold_.rho);
-  spnColdDensity_->setSuffix(" kg/m³");
+  spnColdDensity_->setSuffix(" kg/m\xC2\xB3");
   connect(spnColdDensity_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formCold->addRow("Density (ρ):", spnColdDensity_);
@@ -425,7 +464,7 @@ QWidget* MainWindow::createTopBar() {
   spnColdViscosity_->setDecimals(5);
   spnColdViscosity_->setSingleStep(0.00001);
   spnColdViscosity_->setValue(cold_.mu);
-  spnColdViscosity_->setSuffix(" Pa·s");
+  spnColdViscosity_->setSuffix(" Pa\xC2\xB7s");
   connect(spnColdViscosity_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formCold->addRow("Viscosity (μ):", spnColdViscosity_);
@@ -433,7 +472,7 @@ QWidget* MainWindow::createTopBar() {
   spnColdSpecificHeat_ = new QDoubleSpinBox(this);
   spnColdSpecificHeat_->setRange(1000, 10000);
   spnColdSpecificHeat_->setValue(cold_.cp);
-  spnColdSpecificHeat_->setSuffix(" J/kg·K");
+  spnColdSpecificHeat_->setSuffix(" J/kg\xC2\xB7K");
   connect(spnColdSpecificHeat_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formCold->addRow("Specific Heat (cp):", spnColdSpecificHeat_);
@@ -442,7 +481,7 @@ QWidget* MainWindow::createTopBar() {
   spnColdConductivity_->setRange(0.01, 5.0);
   spnColdConductivity_->setDecimals(3);
   spnColdConductivity_->setValue(cold_.k);
-  spnColdConductivity_->setSuffix(" W/m·K");
+  spnColdConductivity_->setSuffix(" W/m\xC2\xB7K");
   connect(spnColdConductivity_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formCold->addRow("Conductivity (k):", spnColdConductivity_);
@@ -450,7 +489,7 @@ QWidget* MainWindow::createTopBar() {
   layout->addWidget(grpColdFluid);
 
   // === GEOMETRY ===
-  auto *grpGeometry = new QGroupBox("📐 Geometry", this);
+  auto *grpGeometry = new QGroupBox("Geometry", this);
   auto *formGeom = new QFormLayout(grpGeometry);
   formGeom->setSpacing(5);
   formGeom->setContentsMargins(8, 8, 8, 8);
@@ -531,7 +570,7 @@ QWidget* MainWindow::createTopBar() {
   spnWallConductivity_ = new QDoubleSpinBox(this);
   spnWallConductivity_->setRange(10, 500);
   spnWallConductivity_->setValue(geom_.wall_k);
-  spnWallConductivity_->setSuffix(" W/m·K");
+  spnWallConductivity_->setSuffix(" W/m\xC2\xB7K");
   connect(spnWallConductivity_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formGeom->addRow("Wall Conductivity:", spnWallConductivity_);
@@ -560,7 +599,7 @@ QWidget* MainWindow::createTopBar() {
   spnRf0_->setDecimals(6);
   spnRf0_->setSingleStep(0.00001);
   spnRf0_->setValue(foulParams_.Rf0);
-  spnRf0_->setSuffix(" m²K/W");
+  spnRf0_->setSuffix(" m\xC2\xB2\xC2\xB7K/W");
   connect(spnRf0_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formFoul->addRow("Initial Rf (Rf0):", spnRf0_);
@@ -570,7 +609,7 @@ QWidget* MainWindow::createTopBar() {
   spnRfMax_->setDecimals(5);
   spnRfMax_->setSingleStep(0.0001);
   spnRfMax_->setValue(foulParams_.RfMax);
-  spnRfMax_->setSuffix(" m²K/W");
+  spnRfMax_->setSuffix(" m\xC2\xB2\xC2\xB7K/W");
   connect(spnRfMax_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formFoul->addRow("Max Rf (RfMax):", spnRfMax_);
@@ -588,7 +627,7 @@ QWidget* MainWindow::createTopBar() {
   spnAlpha_->setDecimals(7);
   spnAlpha_->setSingleStep(0.0000001);
   spnAlpha_->setValue(foulParams_.alpha);
-  spnAlpha_->setSuffix(" m²K/(W·s)");
+  spnAlpha_->setSuffix(" m\xC2\xB2\xC2\xB7K/(W\xC2\xB7s)");
   connect(spnAlpha_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &MainWindow::onParameterChanged);
   formFoul->addRow("Linear Rate (α):", spnAlpha_);
@@ -605,7 +644,7 @@ QWidget* MainWindow::createTopBar() {
   layout->addWidget(grpFouling_);
 
   // === LIMITS ===
-  auto *grpLimits = new QGroupBox("⚠️ Operating Limits", this);
+  auto *grpLimits = new QGroupBox("Operating Limits", this);
   auto *formLimits = new QFormLayout(grpLimits);
   formLimits->setSpacing(5);
   formLimits->setContentsMargins(8, 8, 8, 8);
@@ -675,12 +714,28 @@ void MainWindow::createChartTabs() {
   chartHeat_ = new ChartWidget(ChartWidget::HEAT_DUTY, this);
   chartPressure_ = new ChartWidget(ChartWidget::PRESSURE, this);
   chartFouling_ = new ChartWidget(ChartWidget::FOULING, this);
+  exchWidget_ = new HeatExchangerWidget(this);
+  exchWidget_->setGeometryData(geom_);
+  exchWidget_->setOperatingPoint(op_);
+
+  // Connect flow control signals from the visualization widget back to spinboxes
+  connect(exchWidget_, &HeatExchangerWidget::hotFlowRateChanged, this, [this](double val) {
+    QSignalBlocker b(spnHotFlowRate_);
+    spnHotFlowRate_->setValue(val);
+    onParameterChanged();
+  });
+  connect(exchWidget_, &HeatExchangerWidget::coldFlowRateChanged, this, [this](double val) {
+    QSignalBlocker b(spnColdFlowRate_);
+    spnColdFlowRate_->setValue(val);
+    onParameterChanged();
+  });
 
   // Add to tabs
-  chartTabs_->addTab(chartTemp_, "🌡️ Temperatures");
-  chartTabs_->addTab(chartHeat_, "🔥 Heat Duty & U");
-  chartTabs_->addTab(chartPressure_, "💧 Pressure Drops");
-  chartTabs_->addTab(chartFouling_, "⚙️ Fouling");
+  chartTabs_->addTab(chartTemp_, "Temperatures");
+  chartTabs_->addTab(chartHeat_, "Heat Duty & U");
+  chartTabs_->addTab(chartPressure_, "Pressure Drops");
+  chartTabs_->addTab(chartFouling_, "Fouling");
+  chartTabs_->addTab(exchWidget_, "Heat Exchanger View");
 }
 
 void MainWindow::applyModernStyle() {
@@ -958,11 +1013,23 @@ void MainWindow::updateSimulationCore() {
   thermo_ = std::make_unique<hx::Thermo>(geom_, hot_, cold_);
   hydro_ = std::make_unique<hx::Hydraulics>(geom_, hot_, cold_);
   fouling_ = std::make_unique<hx::Fouling>(foulParams_);
+
+  if (exchWidget_) {
+    exchWidget_->setGeometryData(geom_);
+    exchWidget_->setOperatingPoint(op_);
+  }
 }
 
 void MainWindow::onParameterChanged() {
   if (!isRunning_) {
-    updateSimulationCore();
+    // Restart debounce timer to delay geometry/simulation updates
+    // This prevents excessive updates during rapid spinbox changes
+    if (geometryUpdateTimer_) {
+      geometryUpdateTimer_->stop();
+      geometryUpdateTimer_->start();
+    } else {
+      updateSimulationCore();
+    }
   }
 }
 
@@ -1017,6 +1084,7 @@ void MainWindow::onStart() {
   isRunning_ = true;
 
   // Start
+  if (exchWidget_) exchWidget_->setSimulationRunning(true);
   simThread_->start();
   statusBar()->showMessage("Simulation running...");
 }
@@ -1025,13 +1093,14 @@ void MainWindow::onStop() {
   if (simWorker_) {
     simWorker_->stop();
   }
-  
+  if (exchWidget_) exchWidget_->setSimulationRunning(false);
+
   // Update UI immediately
   btnStart_->setEnabled(true);
   btnPause_->setEnabled(false);
   btnStop_->setEnabled(false);
   isPaused_ = false;
-  
+
   statusBar()->showMessage("Stopping simulation...");
 }
 
@@ -1044,6 +1113,9 @@ void MainWindow::onSimulationSample(double t, const hx::State& state) {
   chartHeat_->addSample(t, state);
   chartPressure_->addSample(t, state);
   chartFouling_->addSample(t, state);
+  if (exchWidget_) {
+    exchWidget_->updateSimulationState(state);
+  }
 }
 
 void MainWindow::onSimulationFinished() {
@@ -1051,7 +1123,8 @@ void MainWindow::onSimulationFinished() {
   btnPause_->setEnabled(false);
   btnStop_->setEnabled(false);
   btnExport_->setEnabled(true);
-  lblStatus_->setText("● Complete");
+  if (exchWidget_) exchWidget_->setSimulationRunning(false);
+  lblStatus_->setText("Complete");
   lblStatus_->setStyleSheet("color: #27ae60; font-weight: bold; font-size: 10pt;");
   isRunning_ = false;
   isPaused_ = false;
@@ -1128,6 +1201,9 @@ void MainWindow::onZoomIn() {
     case 1: chartHeat_->zoomIn(); break;
     case 2: chartPressure_->zoomIn(); break;
     case 3: chartFouling_->zoomIn(); break;
+    case 4:
+      if (exchWidget_) exchWidget_->zoomIn();
+      break;
   }
 }
 
@@ -1138,6 +1214,9 @@ void MainWindow::onZoomOut() {
     case 1: chartHeat_->zoomOut(); break;
     case 2: chartPressure_->zoomOut(); break;
     case 3: chartFouling_->zoomOut(); break;
+    case 4:
+      if (exchWidget_) exchWidget_->zoomOut();
+      break;
   }
 }
 
@@ -1148,6 +1227,9 @@ void MainWindow::onZoomReset() {
     case 1: chartHeat_->resetZoom(); break;
     case 2: chartPressure_->resetZoom(); break;
     case 3: chartFouling_->resetZoom(); break;
+    case 4:
+      if (exchWidget_) exchWidget_->resetZoom();
+      break;
   }
 }
 
@@ -1231,4 +1313,100 @@ void MainWindow::onSimulationModeChanged(int index) {
   }
 }
 
+void MainWindow::onGeometryDebounceTimeout() {
+  validateAndUpdateGeometry();
+}
+
+void MainWindow::validateAndUpdateGeometry() {
+  // Validate geometry parameters before updating
+  QString errorMsg;
+  if (!validateGeometryParameters(geom_, errorMsg)) {
+    QMessageBox::warning(this, "Invalid Geometry",
+                        QString("Geometry validation failed:\n\n%1").arg(errorMsg));
+    statusBar()->showMessage("Invalid geometry parameters - please correct them", 5000);
+    return;
+  }
+  
+  // All validations passed - safe to update
+  updateSimulationCore();
+  statusBar()->showMessage("Geometry updated successfully", 3000);
+}
+
+bool MainWindow::validateGeometryParameters(const hx::Geometry &geom, QString &errorMsg) {
+  // Validate tube parameters
+  if (geom.nTubes < 1) {
+    errorMsg = "Number of tubes must be at least 1";
+    return false;
+  }
+  
+  if (geom.nTubes > 5000) {
+    errorMsg = "Number of tubes exceeds maximum (5000)";
+    return false;
+  }
+  
+  if (geom.Di <= 0.0 || geom.Do <= 0.0) {
+    errorMsg = "Tube diameters must be positive";
+    return false;
+  }
+  
+  if (geom.Do <= geom.Di) {
+    errorMsg = "Outer diameter must be greater than inner diameter";
+    return false;
+  }
+  
+  if (geom.L <= 0.0) {
+    errorMsg = "Tube length must be positive";
+    return false;
+  }
+  
+  // Validate pitch vs tube diameter
+  if (geom.pitch < geom.Do * 1.1) {
+    errorMsg = QString("Pitch (%.1f mm) too small for tube diameter (%.1f mm) - minimum is %.1f mm")
+      .arg(geom.pitch * 1000, 0, 'f', 1)
+      .arg(geom.Do * 1000, 0, 'f', 1)
+      .arg(geom.Do * 1100, 0, 'f', 1);
+    return false;
+  }
+  
+  // Validate shell parameters
+  if (geom.shellID <= 0.0) {
+    errorMsg = "Shell inner diameter must be positive";
+    return false;
+  }
+  
+  if (geom.shellID <= geom.Do) {
+    errorMsg = "Shell diameter must be larger than tube outer diameter";
+    return false;
+  }
+  
+  // Validate baffle parameters
+  if (geom.nBaffles < 0) {
+    errorMsg = "Number of baffles cannot be negative";
+    return false;
+  }
+  
+  if (geom.baffleSpacing <= 0.0) {
+    errorMsg = "Baffle spacing must be positive";
+    return false;
+  }
+  
+  if (geom.baffleCutFrac < 0.15 || geom.baffleCutFrac > 0.45) {
+    errorMsg = "Baffle cut fraction must be between 0.15 and 0.45";
+    return false;
+  }
+  
+  // Validate wall parameters
+  if (geom.wall_thickness <= 0.0) {
+    errorMsg = "Wall thickness must be positive";
+    return false;
+  }
+  
+  if (geom.wall_k <= 0.0) {
+    errorMsg = "Wall thermal conductivity must be positive";
+    return false;
+  }
+  
+  // All checks passed
+  return true;
+}
 

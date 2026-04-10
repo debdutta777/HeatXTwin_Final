@@ -6,6 +6,7 @@
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QValueAxis>
 #include <vector>
+#include <limits>
 #include "core/Types.hpp"
 
 /**
@@ -43,13 +44,14 @@ public:
     TEMPERATURE,  // Tc_out, Th_out (20-100°C)
     HEAT_DUTY,    // Q, U (0-500)
     PRESSURE,     // dP_tube, dP_shell (0-40k)
-    FOULING       // Rf (0-10)
+    FOULING,      // Rf (0-10)
+    PID_CONTROL   // Tc_out, setpoint, cold flow (scaled)
   };
 
   explicit ChartWidget(ChartType type, QWidget *parent = nullptr);
   
   void clear();
-  void addSample(double t, const hx::State& state);
+  void addSample(double t, const hx::State& state, double pidSetpointTcOut = std::numeric_limits<double>::quiet_NaN(), double coldFlow = std::numeric_limits<double>::quiet_NaN());
   
 public slots:
   void zoomIn();
@@ -66,6 +68,7 @@ private:
   CustomChartView *chartView_{};
   QValueAxis *axisX_{};
   QValueAxis *axisY_{};
+  QValueAxis *axisY2_{};  // Right Y-axis for dual-axis PID chart
   
   // Series (only 2-3 per chart for clarity)
   QLineSeries *series1_{};
@@ -78,5 +81,7 @@ private:
   
   double minY_{0.0};
   double maxY_{100.0};
+  double minY2_{0.0};  // Right Y-axis min for PID
+  double maxY2_{10.0}; // Right Y-axis max for PID
   int sampleCount_{0};
 };

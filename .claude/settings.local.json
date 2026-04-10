@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=\"vcpkg/scripts/buildsystems/vcpkg.cmake\")",
+      "Bash(cmake --build build --config Release)",
+      "Bash(cmake -S . -B build)",
+      "Bash(tasklist)",
+      "Bash(taskkill /F /PID 15404)",
+      "Bash(cmd.exe /c \"taskkill /F /IM HeatXTwin_Pro.exe\")",
+      "Bash(./vcpkg_installed/x64-windows/tools/Qt6/bin/windeployqt6.exe --no-compiler-runtime build/Release/HeatXTwin_Pro.exe)"
+    ]
+  }
+}

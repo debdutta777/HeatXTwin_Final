@@ -1,4 +1,16 @@
 {
+  "cmake.cmakePath": "C:/Program Files/CMake/bin/cmake.exe",
+  "cmake.generator": "Visual Studio 17 2022",
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.configureOnOpen": true,
+  "cmake.configureSettings": {
+    "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+    "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+    "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+    "HEATXTWIN_ENABLE_WINDEPLOYQT": "OFF"
+  },
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
   "C_Cpp_Runner.cCompilerPath": "gcc",
   "C_Cpp_Runner.cppCompilerPath": "g++",
   "C_Cpp_Runner.debuggerPath": "gdb",

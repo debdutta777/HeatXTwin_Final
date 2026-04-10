@@ -2,9 +2,16 @@
   "configurations": [
     {
       "name": "Win32",
+      "configurationProvider": "ms-vscode.cmake-tools",
+      "compileCommands": "${workspaceFolder}/build/compile_commands.json",
       "includePath": [
         "${workspaceFolder}/**",
-        "${workspaceFolder}/build/vcpkg_installed/x64-windows/include"
+        "${workspaceFolder}/build/vcpkg_installed/x64-windows/include",
+        "${workspaceFolder}/vcpkg/packages/qtbase_x64-windows/include",
+        "${workspaceFolder}/vcpkg/packages/fmt_x64-windows/include",
+        "${workspaceFolder}/vcpkg/packages/spdlog_x64-windows/include",
+        "${workspaceFolder}/vcpkg/packages/tomlplusplus_x64-windows/include",
+        "${workspaceFolder}/vcpkg/packages/eigen3_x64-windows/include"
       ],
       "defines": [
         "_DEBUG",
@@ -12,7 +19,7 @@
         "_UNICODE"
       ],
       "windowsSdkVersion": "10.0.22621.0",
-      "compilerPath": "C:/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64/cl.exe",
+      "compilerPath": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe",
       "cStandard": "c17",
       "cppStandard": "c++17",
       "intelliSenseMode": "windows-msvc-x64"

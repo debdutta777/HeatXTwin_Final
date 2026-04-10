@@ -6,6 +6,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <algorithm>
+#include <cmath>
 
 // ============================================================================
 // CustomChartView Implementation
@@ -174,50 +175,82 @@ void ChartWidget::setupSeries() {
 
   switch (type_) {
     case TEMPERATURE:
-      chart_->setTitle("🌡️ Temperature Profiles");
-      axisY_->setTitleText("Temperature [°C]");
+      chart_->setTitle("Temperature Profiles");
+      axisY_->setTitleText("Temperature [\xC2\xB0""C]");
       axisY_->setRange(20, 100);
       minY_ = 20; maxY_ = 100;
-      
-      series1_ = createSeries("Tc_out (Cold Outlet)", QColor(41, 128, 185));   // Blue
-      series2_ = createSeries("Th_out (Hot Outlet)", QColor(230, 126, 34));    // Orange
-      series1Name_ = "Tc_out";
-      series2Name_ = "Th_out";
+
+      series1_ = createSeries("Tc,out (Cold Outlet)", QColor(41, 128, 185));   // Blue
+      series2_ = createSeries("Th,out (Hot Outlet)", QColor(230, 126, 34));    // Orange
+      series1Name_ = "Tc out";
+      series2Name_ = "Th out";
       break;
 
     case HEAT_DUTY:
-      chart_->setTitle("🔥 Heat Duty & Transfer Coefficient");
-      axisY_->setTitleText("Q [kW] / U [W/m²K]");
+      chart_->setTitle("Heat Duty & Overall Heat Transfer Coefficient");
+      axisY_->setTitleText("Q [kW] / U [W/m\xC2\xB2\xC2\xB7K]");
       axisY_->setRange(0, 500);
       minY_ = 0; maxY_ = 500;
-      
-      series1_ = createSeries("Q (Heat Duty)", QColor(46, 204, 113));          // Green
-      series2_ = createSeries("U (HT Coefficient)", QColor(155, 89, 182));     // Purple
+
+      series1_ = createSeries("Q - Heat Duty [kW]", QColor(46, 204, 113));          // Green
+      series2_ = createSeries("U - HT Coefficient [W/m\xC2\xB2\xC2\xB7K]", QColor(155, 89, 182));  // Purple
       series1Name_ = "Q";
       series2Name_ = "U";
       break;
 
     case PRESSURE:
-      chart_->setTitle("💧 Pressure Drops");
+      chart_->setTitle("Pressure Drop Analysis");
       axisY_->setTitleText("Pressure Drop [Pa]");
       axisY_->setRange(0, 40000);
       minY_ = 0; maxY_ = 40000;
-      
-      series1_ = createSeries("dP_tube (Tube Side)", QColor(26, 188, 156));    // Teal
-      series2_ = createSeries("dP_shell (Shell Side)", QColor(231, 76, 60));   // Red
-      series1Name_ = "dP_tube";
-      series2Name_ = "dP_shell";
+
+      series1_ = createSeries("Tube Side dP [Pa]", QColor(26, 188, 156));    // Teal
+      series2_ = createSeries("Shell Side dP [Pa]", QColor(231, 76, 60));    // Red
+      series1Name_ = "dP tube";
+      series2Name_ = "dP shell";
       break;
 
     case FOULING:
-      chart_->setTitle("⚙️ Fouling Resistance");
-      axisY_->setTitleText("Rf×10⁴ [m²K/W × 10⁴]");
+      chart_->setTitle("Fouling Resistance Growth");
+      axisY_->setTitleText("Rf x 10\xE2\x81\xB4 [m\xC2\xB2\xC2\xB7K/W]");
       axisY_->setRange(0, 20);
       minY_ = 0; maxY_ = 100; // Allow up to 0.01 Rf
-      
-      series1_ = createSeries("Rf (Fouling)", QColor(52, 152, 219));           // Light Blue
+
+      series1_ = createSeries("Rf - Fouling Resistance", QColor(52, 152, 219));  // Light Blue
       series1Name_ = "Rf";
       series2_ = nullptr;  // Only one series for fouling
+      break;
+
+    case PID_CONTROL:
+      chart_->setTitle("PID Controller Tracking");
+      axisY_->setTitleText("Temperature [\xC2\xB0""C]");
+      axisY_->setRange(0, 120);
+      minY_ = 0; maxY_ = 150;
+
+      // Create left-axis series (temperature)
+      series1_ = createSeries("Tc,out [\xC2\xB0""C]", QColor(41, 128, 185));
+      series2_ = createSeries("Setpoint [\xC2\xB0""C]", QColor(231, 76, 60));
+      series1Name_ = "Tc out";
+      series2Name_ = "Setpoint";
+
+      // Create right-axis series (flow rate)
+      axisY2_ = new QValueAxis();
+      axisY2_->setTitleText("Cold Flow Rate [kg/s]");
+      axisY2_->setRange(0, 10);
+      axisY2_->setLabelsColor(QColor(60, 60, 60));
+      chart_->addAxis(axisY2_, Qt::AlignRight);
+      minY2_ = 0; maxY2_ = 10;
+
+      series3_ = new QLineSeries();
+      series3_->setName("Cold Flow [kg/s]");
+      QPen pen3(QColor(46, 204, 113));
+      pen3.setWidth(2);
+      series3_->setPen(pen3);
+      chart_->addSeries(series3_);
+      series3_->attachAxis(axisX_);
+      series3_->attachAxis(axisY2_);  // Attach to right axis
+      series3_->setPointLabelsVisible(false);
+      series3Name_ = "Cold Flow";
       break;
   }
 }
@@ -235,12 +268,16 @@ void ChartWidget::clear() {
     case HEAT_DUTY: axisY_->setRange(0, 500); break;
     case PRESSURE: axisY_->setRange(0, 40000); break;
     case FOULING: axisY_->setRange(0, 20); break;
+    case PID_CONTROL:
+      axisY_->setRange(0, 120);
+      if (axisY2_) axisY2_->setRange(0, 10);
+      break;
   }
   
   sampleCount_ = 0;
 }
 
-void ChartWidget::addSample(double t, const hx::State& state) {
+void ChartWidget::addSample(double t, const hx::State& state, double pidSetpointTcOut, double coldFlow) {
   // Add data points based on chart type
   switch (type_) {
     case TEMPERATURE:
@@ -261,6 +298,18 @@ void ChartWidget::addSample(double t, const hx::State& state) {
     case FOULING:
       series1_->append(t, state.Rf * 10000.0);  // Scale for visibility
       break;
+
+    case PID_CONTROL:
+      series1_->append(t, state.Tc_out);
+      if (series2_) {
+        const double setpoint = std::isnan(pidSetpointTcOut) ? state.Tc_out : pidSetpointTcOut;
+        series2_->append(t, setpoint);
+      }
+      if (series3_) {
+        const double flow = std::isnan(coldFlow) ? 0.0 : coldFlow;  // No scaling
+        series3_->append(t, flow);
+      }
+      break;
   }
 
   // Auto-scale time axis
@@ -275,6 +324,7 @@ void ChartWidget::addSample(double t, const hx::State& state) {
 }
 
 void ChartWidget::updateAxes(double t, const hx::State& state) {
+  (void)t;
   double val1 = 0, val2 = 0;
   
   switch (type_) {
@@ -293,6 +343,10 @@ void ChartWidget::updateAxes(double t, const hx::State& state) {
     case FOULING:
       val1 = state.Rf * 10000.0;
       val2 = val1;
+      break;
+    case PID_CONTROL:
+      val1 = state.Tc_out;
+      val2 = state.Tc_out;
       break;
   }
 
@@ -323,6 +377,28 @@ void ChartWidget::updateAxes(double t, const hx::State& state) {
       std::abs(newMax - axisY_->max()) > range * 0.1) {
     axisY_->setRange(newMin, newMax);
   }
+  
+  // Update right Y-axis for PID control chart with flow rate data
+  if (type_ == PID_CONTROL && axisY2_ && series3_ && series3_->count() > 0) {
+    // Get min/max from flow series data
+    double flowMin = 1e9, flowMax = -1e9;
+    for (const auto& point : series3_->points()) {
+      if (point.y() < flowMin) flowMin = point.y();
+      if (point.y() > flowMax) flowMax = point.y();
+    }
+    
+    if (flowMin < 1e9 && flowMax > -1e9) {
+      double flowRange = flowMax - flowMin;
+      double flowMargin = std::max(flowRange * 0.15, 0.1);
+      double newFlowMin = std::max(minY2_, flowMin - flowMargin);
+      double newFlowMax = std::min(maxY2_, flowMax + flowMargin);
+      
+      if (std::abs(newFlowMin - axisY2_->min()) > flowRange * 0.1 ||
+          std::abs(newFlowMax - axisY2_->max()) > flowRange * 0.1) {
+        axisY2_->setRange(newFlowMin, newFlowMax);
+      }
+    }
+  }
 }
 
 void ChartWidget::zoomIn() {
@@ -343,5 +419,9 @@ void ChartWidget::resetZoom() {
     case HEAT_DUTY: axisY_->setRange(0, 500); break;
     case PRESSURE: axisY_->setRange(0, 40000); break;
     case FOULING: axisY_->setRange(0, 10); break;
+    case PID_CONTROL:
+      axisY_->setRange(0, 120);
+      if (axisY2_) axisY2_->setRange(0, 10);
+      break;
   }
 }

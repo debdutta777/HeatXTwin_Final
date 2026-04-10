@@ -8,6 +8,7 @@
 #include <QLabel>
 #include <QComboBox>
 #include <QThread>
+#include <QTimer>
 #include <QString>
 #include <memory>
 #include <vector>
@@ -18,6 +19,7 @@
 #include "core/Simulator.hpp"
 
 class ChartWidget;
+class HeatExchangerWidget;
 class SimWorker;
 class QGroupBox;
 
@@ -54,6 +56,7 @@ private slots:
   void onZoomReset();
   void onExportData();
   void onParameterChanged();
+  void onGeometryDebounceTimeout();
   void onSimulationSample(double t, const hx::State& state);
   void onSimulationFinished();
   void onSimulationModeChanged(int index);
@@ -67,7 +70,9 @@ private:
   void updateSimulationCore();
   void resetToDefaults();
   void applySimulationModeToUi();
+  void validateAndUpdateGeometry();
   static QString simulationModeLabel(SimulationMode mode);
+  static bool validateGeometryParameters(const hx::Geometry &geom, QString &errorMsg);
 
   // === TOP BAR CONTROLS ===
   QPushButton *btnStart_{};
@@ -135,6 +140,7 @@ private:
   ChartWidget *chartHeat_{};       // Q & U (0-500)
   ChartWidget *chartPressure_{};   // dP_tube & dP_shell (0-40k)
   ChartWidget *chartFouling_{};    // Rf (0-10)
+  HeatExchangerWidget *exchWidget_{};
 
   // === SIMULATION CORE ===
   std::unique_ptr<hx::Thermo> thermo_;
@@ -151,6 +157,9 @@ private:
   QThread *simThread_{};
   SimWorker *simWorker_{};
   SimulationMode simulationMode_{SimulationMode::DynamicFouling};
+  
+  // === GEOMETRY UPDATE DEBOUNCING ===
+  QTimer *geometryUpdateTimer_{};
   
   bool isRunning_{false};
   bool isPaused_{false};
