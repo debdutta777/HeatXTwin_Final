@@ -255,6 +255,59 @@ void ChartWidget::setupSeries() {
   }
 }
 
+namespace {
+// Render a dashed version of a colour at 60% alpha for baseline overlays.
+QPen baselinePen(const QColor &c) {
+  QColor fade = c;
+  fade.setAlpha(140);
+  QPen pen(fade);
+  pen.setWidth(2);
+  pen.setStyle(Qt::DashLine);
+  return pen;
+}
+
+QLineSeries *copyAsBaseline(QLineSeries *src, const QString &suffix) {
+  if (!src) return nullptr;
+  auto *copy = new QLineSeries();
+  copy->setName(src->name() + suffix);
+  copy->setPen(baselinePen(src->pen().color()));
+  copy->replace(src->points());
+  return copy;
+}
+}  // namespace
+
+void ChartWidget::captureBaseline() {
+  clearBaseline();
+
+  auto attach = [&](QLineSeries *s, QValueAxis *yAx) {
+    if (!s || s->count() == 0) return static_cast<QLineSeries*>(nullptr);
+    auto *b = copyAsBaseline(s, " (baseline)");
+    chart_->addSeries(b);
+    b->attachAxis(axisX_);
+    b->attachAxis(yAx);
+    return b;
+  };
+
+  baseline1_ = attach(series1_, axisY_);
+  baseline2_ = attach(series2_, axisY_);
+  baseline3_ = attach(series3_, type_ == PID_CONTROL && axisY2_ ? axisY2_ : axisY_);
+
+  hasBaseline_ = (baseline1_ || baseline2_ || baseline3_);
+}
+
+void ChartWidget::clearBaseline() {
+  auto drop = [&](QLineSeries *&b) {
+    if (!b) return;
+    chart_->removeSeries(b);
+    delete b;
+    b = nullptr;
+  };
+  drop(baseline1_);
+  drop(baseline2_);
+  drop(baseline3_);
+  hasBaseline_ = false;
+}
+
 void ChartWidget::clear() {
   series1_->clear();
   if (series2_) series2_->clear();

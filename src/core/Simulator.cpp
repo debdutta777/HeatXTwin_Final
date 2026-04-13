@@ -10,7 +10,7 @@
 
 namespace hx {
 
-Simulator::Simulator(const Thermo &thermo, const Hydraulics &hydro, const Fouling &foul, const SimConfig &cfg)
+Simulator::Simulator(Thermo &thermo, const Hydraulics &hydro, const Fouling &foul, const SimConfig &cfg)
     : thermo_(thermo), hydro_(hydro), foul_(foul), cfg_(cfg) {}
 
 void Simulator::setSteadyStateMode(bool enabled) {
@@ -24,17 +24,41 @@ void Simulator::setFoulingEnabled(bool enabled) {
   }
 }
 
-void Simulator::reset(const OperatingPoint &op0) { 
-  op_ = op0; 
+void Simulator::reset(const OperatingPoint &op0) {
+  op_ = op0;
   // Pass k_deposit to steady state calculation
-  state_ = thermo_.steady(op_, 0.0, 0.0, foul_.params().k_deposit);
+  state_ = thermo_.steady(op_, 0.0, 0.0, foul_.params().k_deposit, cfg_.arrangement);
   // Initialize with small deterministic perturbations for consistency
   state_.Tc_out += 0.1; // +0.1°C initial variation
   state_.Th_out -= 0.1; // -0.1°C initial variation
+
+  // (Re)allocate PID controller with current gains.
+  if (cfg_.pid.enabled) {
+    pid_ = std::make_unique<ControllerPID>(
+        cfg_.pid.kp, cfg_.pid.ki, cfg_.pid.kd,
+        cfg_.pid.u_min, cfg_.pid.u_max, cfg_.pid.rate_limit);
+    state_.pidSetpoint = cfg_.pid.setpoint_Tc_out;
+    state_.pidColdFlow = op_.m_dot_cold;
+  } else {
+    pid_.reset();
+    state_.pidSetpoint = std::numeric_limits<double>::quiet_NaN();
+    state_.pidColdFlow = std::numeric_limits<double>::quiet_NaN();
+  }
 }
 
 const State &Simulator::step(double t) {
   const double dt = cfg_.dt;
+
+  // Update temperature-dependent fluid properties if either side uses a preset.
+  // Mean film temperature = ((T_in + T_out) / 2).
+  if (cfg_.hotPreset != FluidPreset::Custom) {
+    const double Tmean = 0.5 * (op_.Tin_hot + state_.Th_out);
+    thermo_.setHot(evaluateFluid(cfg_.hotPreset, Tmean, cfg_.hotCustom));
+  }
+  if (cfg_.coldPreset != FluidPreset::Custom) {
+    const double Tmean = 0.5 * (op_.Tin_cold + state_.Tc_out);
+    thermo_.setCold(evaluateFluid(cfg_.coldPreset, Tmean, cfg_.coldCustom));
+  }
 
   double Rf_shell = 0.0;
   double Rf_tube = 0.0;
@@ -99,17 +123,46 @@ const State &Simulator::step(double t) {
     }
   }
   // else: steadyStateMode_ = true, no disturbances added, use op_ directly
-  
+
+  // PID regulates cold-side mass flow to track setpoint on Tc_out.
+  if (cfg_.pid.enabled && pid_) {
+    const double u = pid_->update(cfg_.pid.setpoint_Tc_out, state_.Tc_out, dt);
+    dynamic_op.m_dot_cold = u;
+    state_.pidSetpoint = cfg_.pid.setpoint_Tc_out;
+    state_.pidColdFlow = u;
+  }
+
   // Compute target steady state for current conditions
-  const State target = thermo_.steady(dynamic_op, Rf_shell, Rf_tube, k_deposit);
+  const State target = thermo_.steady(dynamic_op, Rf_shell, Rf_tube, k_deposit, cfg_.arrangement);
 
   // Use proper dynamic energy balance ODEs instead of first-order lags
   // Get current U and heat transfer area
   const double Ut = thermo_.U(dynamic_op.m_dot_hot, dynamic_op.m_dot_cold, Rf_shell, Rf_tube, k_deposit);
   const double A = thermo_.geometry().areaOuter();
   
-  // Instantaneous heat transfer based on current outlet temperatures
-  const double Qt = Ut * A * (state_.Th_out - state_.Tc_out);
+  // Instantaneous heat transfer based on current outlet temperatures (lumped).
+  // For shell-&-tube configurations apply the Bowman LMTD-F correction so that
+  // the multi-pass arrangement under-delivers relative to counter-flow as
+  // textbook theory predicts.
+  double F = 1.0;
+  if (cfg_.arrangement == FlowArrangement::ShellTube_1_2 ||
+      cfg_.arrangement == FlowArrangement::ShellTube_2_4) {
+    const double dT_in = dynamic_op.Tin_hot - dynamic_op.Tin_cold;
+    if (dT_in > 1e-3) {
+      const double dTc = std::max(state_.Tc_out - dynamic_op.Tin_cold, 1e-6);
+      const double R   = (dynamic_op.Tin_hot - state_.Th_out) / dTc;
+      const double P   = (state_.Tc_out - dynamic_op.Tin_cold) / dT_in;
+      F = Thermo::lmtdCorrectionF(cfg_.arrangement, R, P);
+    }
+  } else if (cfg_.arrangement == FlowArrangement::ParallelFlow) {
+    // Parallel-flow cannot achieve counter-flow ΔT profile; scale by a
+    // simple ratio of local ΔT to maximum inlet ΔT.
+    const double dT_in = std::max(dynamic_op.Tin_hot - dynamic_op.Tin_cold, 1e-6);
+    F = std::clamp((state_.Th_out - state_.Tc_out) / dT_in, 0.0, 1.0);
+    // Guard against runaway scaling when approaching steady state.
+    F = std::max(F, 0.5);
+  }
+  const double Qt = Ut * A * (state_.Th_out - state_.Tc_out) * F;
   
   // Heat capacity rates
   const double Ch = dynamic_op.m_dot_hot * thermo_.hot().cp;

@@ -44,14 +44,28 @@ public:
   [[nodiscard]] double U(double m_dot_hot, double m_dot_cold, double Rf_shell, double Rf_tube, double k_deposit) const;
 
   /** Steady-state mapping from inlets and flows to outlets and heat duty via ε–NTU.
-   *  Counter-flow effectiveness is used by default.
+   *  \param arrangement Selects counter/parallel/shell-&-tube effectiveness formula.
    */
-  [[nodiscard]] State steady(const OperatingPoint &op, double Rf_shell, double Rf_tube, double k_deposit) const;
+  [[nodiscard]] State steady(const OperatingPoint &op, double Rf_shell, double Rf_tube,
+                               double k_deposit,
+                               FlowArrangement arrangement = FlowArrangement::CounterFlow) const;
+
+  /** LMTD correction factor F for the selected arrangement (dimensionless).
+   *  Returns 1.0 for pure counter-flow. For shell-&-tube configurations uses
+   *  the Bowman (1936) correlation based on P and R.
+   *  \param R = (T_h,in − T_h,out) / (T_c,out − T_c,in)
+   *  \param P = (T_c,out − T_c,in) / (T_h,in − T_c,in)
+   */
+  [[nodiscard]] static double lmtdCorrectionF(FlowArrangement arrangement, double R, double P);
 
   /** Accessor methods for dynamic simulation */
   [[nodiscard]] const Geometry& geometry() const { return g_; }
   [[nodiscard]] const Fluid& hot() const { return hot_; }
   [[nodiscard]] const Fluid& cold() const { return cold_; }
+
+  /** Override fluid properties at runtime (e.g. temperature-dependent updates). */
+  void setHot(const Fluid &f)  { hot_  = f; }
+  void setCold(const Fluid &f) { cold_ = f; }
 
 private:
   Geometry g_;

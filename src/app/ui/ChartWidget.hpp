@@ -49,9 +49,16 @@ public:
   };
 
   explicit ChartWidget(ChartType type, QWidget *parent = nullptr);
-  
+
   void clear();
   void addSample(double t, const hx::State& state, double pidSetpointTcOut = std::numeric_limits<double>::quiet_NaN(), double coldFlow = std::numeric_limits<double>::quiet_NaN());
+
+  /** Snapshot the current live traces as an immutable baseline overlay.
+   *  The baseline is rendered as dashed lines with reduced opacity so the user
+   *  can compare subsequent runs against the stored reference. */
+  void captureBaseline();
+  void clearBaseline();
+  [[nodiscard]] bool hasBaseline() const { return hasBaseline_; }
   
 public slots:
   void zoomIn();
@@ -78,6 +85,12 @@ private:
   QString series1Name_;
   QString series2Name_;
   QString series3Name_;
+
+  // Baseline overlay (snapshot of a previous run).
+  QLineSeries *baseline1_{};
+  QLineSeries *baseline2_{};
+  QLineSeries *baseline3_{};
+  bool hasBaseline_{false};
   
   double minY_{0.0};
   double maxY_{100.0};

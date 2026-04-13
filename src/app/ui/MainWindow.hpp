@@ -16,10 +16,12 @@
 #include "core/Thermo.hpp"
 #include "core/Hydraulics.hpp"
 #include "core/Fouling.hpp"
+#include "core/FluidLibrary.hpp"
 #include "core/Simulator.hpp"
 
 class ChartWidget;
 class HeatExchangerWidget;
+class KPIPanel;
 class SimWorker;
 class QGroupBox;
 
@@ -55,6 +57,9 @@ private slots:
   void onZoomOut();
   void onZoomReset();
   void onExportData();
+  void onSnapshotBaseline();
+  void onClearBaseline();
+  void onGenerateReport();
   void onParameterChanged();
   void onGeometryDebounceTimeout();
   void onSimulationSample(double t, const hx::State& state);
@@ -83,6 +88,9 @@ private:
   QPushButton *btnZoomOut_{};
   QPushButton *btnZoomReset_{};
   QPushButton *btnExport_{};
+  QPushButton *btnSnapshot_{};
+  QPushButton *btnClearBaseline_{};
+  QPushButton *btnReport_{};
   QLabel *lblStatus_{};
   QDoubleSpinBox *spnDuration_{};
   QDoubleSpinBox *spnTimeStep_{};
@@ -96,12 +104,14 @@ private:
   QDoubleSpinBox *spnColdInletTemp_{};
 
   // === HOT FLUID PROPERTIES ===
+  QComboBox *cmbHotPreset_{};
   QDoubleSpinBox *spnHotDensity_{};
   QDoubleSpinBox *spnHotViscosity_{};
   QDoubleSpinBox *spnHotSpecificHeat_{};
   QDoubleSpinBox *spnHotConductivity_{};
 
   // === COLD FLUID PROPERTIES ===
+  QComboBox *cmbColdPreset_{};
   QDoubleSpinBox *spnColdDensity_{};
   QDoubleSpinBox *spnColdViscosity_{};
   QDoubleSpinBox *spnColdSpecificHeat_{};
@@ -119,6 +129,7 @@ private:
   QSpinBox *spnNumBaffles_{};
   QDoubleSpinBox *spnWallConductivity_{};
   QDoubleSpinBox *spnWallThickness_{};
+  QComboBox *cmbFlowArrangement_{};
 
   // === FOULING PARAMETERS (LEFT PANEL) ===
   QDoubleSpinBox *spnRf0_{};
@@ -134,13 +145,25 @@ private:
   QDoubleSpinBox *spnMinColdFlowRate_{};
   QDoubleSpinBox *spnMaxColdFlowRate_{};
 
+  // === PID CONTROL ===
+  QGroupBox *grpPid_{};
+  QDoubleSpinBox *spnPidSetpoint_{};
+  QDoubleSpinBox *spnPidKp_{};
+  QDoubleSpinBox *spnPidKi_{};
+  QDoubleSpinBox *spnPidKd_{};
+  QDoubleSpinBox *spnPidUMin_{};
+  QDoubleSpinBox *spnPidUMax_{};
+
   // === CHART TABS (RIGHT PANEL) ===
   QTabWidget *chartTabs_{};
   ChartWidget *chartTemp_{};       // Temperatures (20-100°C)
   ChartWidget *chartHeat_{};       // Q & U (0-500)
   ChartWidget *chartPressure_{};   // dP_tube & dP_shell (0-40k)
   ChartWidget *chartFouling_{};    // Rf (0-10)
+  ChartWidget *chartPID_{};        // PID setpoint tracking + cold-flow command
   HeatExchangerWidget *exchWidget_{};
+  KPIPanel *kpiPanel_{};
+  double U_clean_baseline_{0.0};   // Captured at simulation start for fouling penalty
 
   // === SIMULATION CORE ===
   std::unique_ptr<hx::Thermo> thermo_;

@@ -748,33 +748,58 @@ void HeatExchangerWidget::drawParticles(QPainter &p) {
   p.setPen(Qt::NoPen);
 
   for (const auto &pt : particles_) {
-    double radius;
-    QColor color;
-
     if (pt.isTubeSide) {
-      color = hotColor(pt.progress);
-      radius = 4.5;
-      // Glow effect
-      QRadialGradient glow(pt.x, pt.y, radius * 2.8);
-      glow.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), 180));
-      glow.setColorAt(0.4, QColor(color.red(), color.green(), color.blue(), 70));
-      glow.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 0));
-      p.setBrush(glow);
-      p.drawEllipse(QPointF(pt.x, pt.y), radius * 2.8, radius * 2.8);
-    } else {
-      color = coldColor(pt.progress);
-      radius = 4.0;
-      QRadialGradient glow(pt.x, pt.y, radius * 2.5);
-      glow.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), 160));
-      glow.setColorAt(0.4, QColor(color.red(), color.green(), color.blue(), 50));
-      glow.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 0));
-      p.setBrush(glow);
-      p.drawEllipse(QPointF(pt.x, pt.y), radius * 2.5, radius * 2.5);
-    }
+      // Hot particles: bright flame-like appearance that contrasts with orange tubes.
+      // Outer red/orange glow -> inner bright yellow -> white hot core.
+      QColor outerCol = hotColor(pt.progress);
+      double rCore = 2.5;
+      double rMid  = 5.0;
+      double rGlow = 9.0;
 
-    // Solid core
-    p.setBrush(color);
-    p.drawEllipse(QPointF(pt.x, pt.y), radius, radius);
+      // Outer red glow (subtle, extends halo)
+      QRadialGradient outer(pt.x, pt.y, rGlow);
+      outer.setColorAt(0.0, QColor(255, 80, 40, 170));
+      outer.setColorAt(0.5, QColor(outerCol.red(), outerCol.green(), outerCol.blue(), 80));
+      outer.setColorAt(1.0, QColor(outerCol.red(), outerCol.green(), outerCol.blue(), 0));
+      p.setBrush(outer);
+      p.drawEllipse(QPointF(pt.x, pt.y), rGlow, rGlow);
+
+      // Middle yellow-orange layer
+      QRadialGradient mid(pt.x, pt.y, rMid);
+      mid.setColorAt(0.0, QColor(255, 240, 150, 255));
+      mid.setColorAt(0.6, QColor(255, 180, 60, 230));
+      mid.setColorAt(1.0, QColor(255, 100, 40, 0));
+      p.setBrush(mid);
+      p.drawEllipse(QPointF(pt.x, pt.y), rMid, rMid);
+
+      // White-hot core — ensures visibility against any background
+      p.setBrush(QColor(255, 255, 255, 255));
+      p.drawEllipse(QPointF(pt.x, pt.y), rCore, rCore);
+    } else {
+      // Cold particles: ice-blue droplet with bright cyan core.
+      QColor outerCol = coldColor(pt.progress);
+      double rCore = 2.0;
+      double rMid  = 4.2;
+      double rGlow = 7.5;
+
+      QRadialGradient outer(pt.x, pt.y, rGlow);
+      outer.setColorAt(0.0, QColor(80, 180, 255, 150));
+      outer.setColorAt(0.6, QColor(outerCol.red(), outerCol.green(), outerCol.blue(), 60));
+      outer.setColorAt(1.0, QColor(outerCol.red(), outerCol.green(), outerCol.blue(), 0));
+      p.setBrush(outer);
+      p.drawEllipse(QPointF(pt.x, pt.y), rGlow, rGlow);
+
+      QRadialGradient mid(pt.x, pt.y, rMid);
+      mid.setColorAt(0.0, QColor(220, 240, 255, 255));
+      mid.setColorAt(0.7, QColor(60, 160, 255, 220));
+      mid.setColorAt(1.0, QColor(30, 120, 255, 0));
+      p.setBrush(mid);
+      p.drawEllipse(QPointF(pt.x, pt.y), rMid, rMid);
+
+      // Bright white core
+      p.setBrush(QColor(240, 250, 255, 255));
+      p.drawEllipse(QPointF(pt.x, pt.y), rCore, rCore);
+    }
   }
 }
 

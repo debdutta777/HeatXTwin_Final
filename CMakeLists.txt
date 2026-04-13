@@ -103,10 +103,12 @@ set(SOURCES
     src/app/ui/ChartWidget.cpp
     src/app/ui/Diagnostics.cpp
     src/app/ui/HeatExchangerWidget.cpp
+    src/app/ui/KPIPanel.cpp
     src/app/ui/MainWindow.cpp
     src/app/ui/SimWorker.cpp
     src/core/ControllerPID.cpp
     src/core/EstimatorRLS.cpp
+    src/core/FluidLibrary.cpp
     src/core/Fouling.cpp
     src/core/Hydraulics.cpp
     src/core/Model.cpp

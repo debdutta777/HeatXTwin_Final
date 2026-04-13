@@ -133,7 +133,99 @@ double Thermo::U(double m_dot_hot, double m_dot_cold, double Rf_shell, double Rf
   return 1.0 / std::max(invU, 1e-9);
 }
 
-State Thermo::steady(const OperatingPoint &op, double Rf_shell, double Rf_tube, double k_deposit) const {
+namespace {
+
+// ε for counter-flow (Kays & London, Table 11-2).
+double eps_counter(double NTU, double Cr) {
+  if (std::abs(1.0 - Cr) < 1e-12) return NTU / (1.0 + NTU);
+  const double e = std::exp(-NTU * (1.0 - Cr));
+  return (1.0 - e) / (1.0 - Cr * e);
+}
+
+// ε for parallel-flow.
+double eps_parallel(double NTU, double Cr) {
+  return (1.0 - std::exp(-NTU * (1.0 + Cr))) / (1.0 + Cr);
+}
+
+// ε for 1-shell-pass, 2-tube-pass heat exchanger.
+double eps_shellTube_1_2(double NTU, double Cr) {
+  const double s = std::sqrt(1.0 + Cr * Cr);
+  const double e = std::exp(-NTU * s);
+  const double bracket = (1.0 + Cr) + s * (1.0 + e) / (1.0 - e);
+  return 2.0 / std::max(bracket, 1e-12);
+}
+
+// ε for n-shell-pass, 2n-tube-pass (via Kays–London recursion on ε₁).
+double eps_shellTube_nShells(int n, double NTU, double Cr) {
+  const double eps1 = eps_shellTube_1_2(NTU / n, Cr);
+  if (std::abs(1.0 - Cr) < 1e-12) {
+    return n * eps1 / (1.0 + (n - 1) * eps1);
+  }
+  const double ratio = (1.0 - eps1 * Cr) / std::max(1.0 - eps1, 1e-12);
+  const double E = std::pow(ratio, n);
+  return (E - 1.0) / std::max(E - Cr, 1e-12);
+}
+
+double effectiveness(FlowArrangement a, double NTU, double Cr) {
+  switch (a) {
+    case FlowArrangement::ParallelFlow:   return eps_parallel(NTU, Cr);
+    case FlowArrangement::ShellTube_1_2:  return eps_shellTube_1_2(NTU, Cr);
+    case FlowArrangement::ShellTube_2_4:  return eps_shellTube_nShells(2, NTU, Cr);
+    case FlowArrangement::CounterFlow:
+    default:                               return eps_counter(NTU, Cr);
+  }
+}
+
+}  // namespace
+
+double Thermo::lmtdCorrectionF(FlowArrangement arrangement, double R, double P) {
+  // Counter/parallel idealisations have F ≡ 1 by convention.
+  if (arrangement == FlowArrangement::CounterFlow ||
+      arrangement == FlowArrangement::ParallelFlow) {
+    return 1.0;
+  }
+
+  // Bowman 1936 correlation for 1-shell-pass, 2-tube-pass.
+  // F = √(R²+1)/(R−1) · ln((1−P)/(1−PR)) / ln((2−P(R+1−√(R²+1)))/(2−P(R+1+√(R²+1))))
+  const double s = std::sqrt(R * R + 1.0);
+  // Guard degenerate P, R values.
+  if (P <= 1e-9 || P >= 1.0 - 1e-9) return 1.0;
+  if (std::abs(R - 1.0) < 1e-9) {
+    // Degenerate form when R = 1.
+    const double num = P * s;
+    const double den = (1.0 - P) * std::log((2.0 - P * (2.0 - s)) / std::max(1e-12, 2.0 - P * (2.0 + s)));
+    const double F = num / std::max(den, 1e-12);
+    return std::clamp(F, 0.3, 1.0);
+  }
+
+  const double num = s / (R - 1.0) * std::log(std::max(1e-12, (1.0 - P) / std::max(1e-12, 1.0 - P * R)));
+  const double den = std::log(std::max(1e-12, (2.0 - P * (R + 1.0 - s)) /
+                                               std::max(1e-12, 2.0 - P * (R + 1.0 + s))));
+  double F = num / std::max(den, 1e-12);
+  // For 2 shell passes, apply square-root-of-two approximation: F_2shells ≈ √(F_1shell)
+  // More precisely, use n-shell generalisation:
+  if (arrangement == FlowArrangement::ShellTube_2_4) {
+    // Recompute F with n-shell formula (Bowman): replace P with P* s.t. chain of 2 1-2 units.
+    // Approximation: F_n = F_1shell evaluated at (P*, R) with P* = (1 - ((1-PR)/(1-P))^(1/n)) /
+    //                                                         (R - ((1-PR)/(1-P))^(1/n))
+    const int n = 2;
+    double ratio = (1.0 - P * R) / std::max(1e-12, 1.0 - P);
+    double root  = std::pow(ratio, 1.0 / n);
+    double Pstar = (1.0 - root) / std::max(1e-12, R - root);
+    // Re-evaluate 1-shell F at (Pstar, R).
+    const double s2 = std::sqrt(R * R + 1.0);
+    const double num2 = s2 / (R - 1.0) *
+        std::log(std::max(1e-12, (1.0 - Pstar) / std::max(1e-12, 1.0 - Pstar * R)));
+    const double den2 = std::log(std::max(1e-12, (2.0 - Pstar * (R + 1.0 - s2)) /
+                                                 std::max(1e-12, 2.0 - Pstar * (R + 1.0 + s2))));
+    F = num2 / std::max(den2, 1e-12);
+  }
+
+  return std::clamp(F, 0.3, 1.0);
+}
+
+State Thermo::steady(const OperatingPoint &op, double Rf_shell, double Rf_tube, double k_deposit,
+                     FlowArrangement arrangement) const {
   State s{};
 
   // Compute U and area
@@ -147,11 +239,9 @@ State Thermo::steady(const OperatingPoint &op, double Rf_shell, double Rf_tube, 
   const double Cmax = std::max(Ch, Cc);
   const double Cr = Cmin / std::max(Cmax, 1e-12);
 
-  // NTU and effectiveness for counter-flow
+  // NTU and effectiveness for the requested arrangement
   const double NTU = (Uo * A) / std::max(Cmin, 1e-12);
-  const double one_minus_Cr = (1.0 - Cr);
-  const double exp_term = std::exp(-NTU * one_minus_Cr);
-  const double eps = (std::abs(one_minus_Cr) < 1e-12) ? (NTU / (1.0 + NTU)) : ((1.0 - exp_term) / (1.0 - Cr * exp_term));
+  const double eps = effectiveness(arrangement, NTU, Cr);
 
   const double Th_in = op.Tin_hot;
   const double Tc_in = op.Tin_cold;

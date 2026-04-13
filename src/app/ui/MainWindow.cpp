@@ -1,6 +1,7 @@
 #include "MainWindow.hpp"
 #include "ChartWidget.hpp"
 #include "HeatExchangerWidget.hpp"
+#include "KPIPanel.hpp"
 #include "SimWorker.hpp"
 #include "Diagnostics.hpp"
 #include "core/Simulator.hpp"
@@ -24,6 +25,11 @@
 #include <QSignalBlocker>
 #include <QString>
 #include <QApplication>
+#include <QDateTime>
+#include <QLocale>
+#include <QDesktopServices>
+#include <QUrl>
+#include <cmath>
 #include <algorithm>
 
 namespace {
@@ -293,6 +299,30 @@ QWidget* MainWindow::createTopBar() {
   connect(btnExport_, &QPushButton::clicked, this, &MainWindow::onExportData);
   row1Layout->addWidget(btnExport_);
 
+  // === SNAPSHOT / BASELINE === (Row 1)
+  btnSnapshot_ = new QPushButton("Snapshot", this);
+  btnSnapshot_->setMinimumSize(100, 38);
+  btnSnapshot_->setEnabled(false);
+  btnSnapshot_->setToolTip(
+      "Capture the current traces as a baseline overlay.\n"
+      "Subsequent runs render on top of the dashed baseline for comparison.");
+  connect(btnSnapshot_, &QPushButton::clicked, this, &MainWindow::onSnapshotBaseline);
+  row1Layout->addWidget(btnSnapshot_);
+
+  btnClearBaseline_ = new QPushButton("Clear Baseline", this);
+  btnClearBaseline_->setMinimumSize(110, 38);
+  btnClearBaseline_->setEnabled(false);
+  btnClearBaseline_->setToolTip("Remove the baseline overlay from all charts.");
+  connect(btnClearBaseline_, &QPushButton::clicked, this, &MainWindow::onClearBaseline);
+  row1Layout->addWidget(btnClearBaseline_);
+
+  btnReport_ = new QPushButton("Report (HTML)", this);
+  btnReport_->setMinimumSize(110, 38);
+  btnReport_->setEnabled(false);
+  btnReport_->setToolTip("Generate an HTML report summarising parameters, KPIs and final state.");
+  connect(btnReport_, &QPushButton::clicked, this, &MainWindow::onGenerateReport);
+  row1Layout->addWidget(btnReport_);
+
   row1Layout->addStretch();
 
   // === SIMULATION PARAMETERS === (Row 2)
@@ -406,6 +436,28 @@ QWidget* MainWindow::createTopBar() {
   formHot->setHorizontalSpacing(10);
   formHot->setVerticalSpacing(5);
 
+  cmbHotPreset_ = new QComboBox(this);
+  for (const auto &info : hx::fluidPresetCatalog()) {
+    cmbHotPreset_->addItem(info.displayName, static_cast<int>(info.preset));
+  }
+  cmbHotPreset_->setCurrentIndex(0);  // Custom
+  cmbHotPreset_->setToolTip(
+      "Select a fluid preset to use temperature-dependent ρ, μ, cp, k. "
+      "Custom keeps the values entered below.");
+  connect(cmbHotPreset_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, [this](int){
+            auto preset = static_cast<hx::FluidPreset>(cmbHotPreset_->currentData().toInt());
+            if (preset != hx::FluidPreset::Custom) {
+              auto f = hx::evaluateFluid(preset, spnHotInletTemp_->value(), hot_);
+              QSignalBlocker b1(spnHotDensity_); spnHotDensity_->setValue(f.rho);
+              QSignalBlocker b2(spnHotViscosity_); spnHotViscosity_->setValue(f.mu);
+              QSignalBlocker b3(spnHotSpecificHeat_); spnHotSpecificHeat_->setValue(f.cp);
+              QSignalBlocker b4(spnHotConductivity_); spnHotConductivity_->setValue(f.k);
+            }
+            onParameterChanged();
+          });
+  formHot->addRow("Preset:", cmbHotPreset_);
+
   spnHotDensity_ = new QDoubleSpinBox(this);
   spnHotDensity_->setRange(500, 2000);
   spnHotDensity_->setValue(hot_.rho);
@@ -450,6 +502,28 @@ QWidget* MainWindow::createTopBar() {
   formCold->setContentsMargins(8, 8, 8, 8);
   formCold->setHorizontalSpacing(10);
   formCold->setVerticalSpacing(5);
+
+  cmbColdPreset_ = new QComboBox(this);
+  for (const auto &info : hx::fluidPresetCatalog()) {
+    cmbColdPreset_->addItem(info.displayName, static_cast<int>(info.preset));
+  }
+  cmbColdPreset_->setCurrentIndex(0);  // Custom
+  cmbColdPreset_->setToolTip(
+      "Select a fluid preset to use temperature-dependent ρ, μ, cp, k. "
+      "Custom keeps the values entered below.");
+  connect(cmbColdPreset_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, [this](int){
+            auto preset = static_cast<hx::FluidPreset>(cmbColdPreset_->currentData().toInt());
+            if (preset != hx::FluidPreset::Custom) {
+              auto f = hx::evaluateFluid(preset, spnColdInletTemp_->value(), cold_);
+              QSignalBlocker b1(spnColdDensity_); spnColdDensity_->setValue(f.rho);
+              QSignalBlocker b2(spnColdViscosity_); spnColdViscosity_->setValue(f.mu);
+              QSignalBlocker b3(spnColdSpecificHeat_); spnColdSpecificHeat_->setValue(f.cp);
+              QSignalBlocker b4(spnColdConductivity_); spnColdConductivity_->setValue(f.k);
+            }
+            onParameterChanged();
+          });
+  formCold->addRow("Preset:", cmbColdPreset_);
 
   spnColdDensity_ = new QDoubleSpinBox(this);
   spnColdDensity_->setRange(500, 2000);
@@ -584,6 +658,19 @@ QWidget* MainWindow::createTopBar() {
           this, &MainWindow::onParameterChanged);
   formGeom->addRow("Wall Thickness:", spnWallThickness_);
 
+  cmbFlowArrangement_ = new QComboBox(this);
+  cmbFlowArrangement_->addItem("Counter-flow (idealised)",   static_cast<int>(hx::FlowArrangement::CounterFlow));
+  cmbFlowArrangement_->addItem("Parallel-flow (co-current)", static_cast<int>(hx::FlowArrangement::ParallelFlow));
+  cmbFlowArrangement_->addItem("Shell & Tube 1-2 (TEMA E)",  static_cast<int>(hx::FlowArrangement::ShellTube_1_2));
+  cmbFlowArrangement_->addItem("Shell & Tube 2-4 (TEMA F)",  static_cast<int>(hx::FlowArrangement::ShellTube_2_4));
+  cmbFlowArrangement_->setCurrentIndex(0);
+  cmbFlowArrangement_->setToolTip(
+      "Flow arrangement determines the ε–NTU formula. Shell-&-tube "
+      "configurations apply the Bowman LMTD correction factor F.");
+  connect(cmbFlowArrangement_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, &MainWindow::onParameterChanged);
+  formGeom->addRow("Flow Arrangement:", cmbFlowArrangement_);
+
   layout->addWidget(grpGeometry);
 
   // === FOULING ===
@@ -642,6 +729,79 @@ QWidget* MainWindow::createTopBar() {
   formFoul->addRow("Fouling Model:", cmbFoulingModel_);
 
   layout->addWidget(grpFouling_);
+
+  // === PID CONTROLLER ===
+  grpPid_ = new QGroupBox("PID Control (cold flow → Tc,out setpoint)", this);
+  grpPid_->setCheckable(true);
+  grpPid_->setChecked(false);
+  connect(grpPid_, &QGroupBox::toggled, this, &MainWindow::onParameterChanged);
+  auto *formPid = new QFormLayout(grpPid_);
+  formPid->setSpacing(5);
+  formPid->setContentsMargins(8, 8, 8, 8);
+  formPid->setHorizontalSpacing(10);
+  formPid->setVerticalSpacing(5);
+
+  spnPidSetpoint_ = new QDoubleSpinBox(this);
+  spnPidSetpoint_->setRange(5.0, 150.0);
+  spnPidSetpoint_->setDecimals(1);
+  spnPidSetpoint_->setSingleStep(0.5);
+  spnPidSetpoint_->setValue(45.0);
+  spnPidSetpoint_->setSuffix(" \xC2\xB0""C");
+  connect(spnPidSetpoint_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &MainWindow::onParameterChanged);
+  formPid->addRow("Setpoint T\xE2\x82\x9C,\xE2\x82\x92\xE1\xB5\xA4\xE1\xB5\x97:", spnPidSetpoint_);
+
+  spnPidKp_ = new QDoubleSpinBox(this);
+  spnPidKp_->setRange(0.0, 5.0);
+  spnPidKp_->setDecimals(4);
+  spnPidKp_->setSingleStep(0.01);
+  spnPidKp_->setValue(0.05);
+  spnPidKp_->setSuffix(" kg/s/\xC2\xB0""C");
+  connect(spnPidKp_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &MainWindow::onParameterChanged);
+  formPid->addRow("K\xE1\xB5\x96 (proportional):", spnPidKp_);
+
+  spnPidKi_ = new QDoubleSpinBox(this);
+  spnPidKi_->setRange(0.0, 1.0);
+  spnPidKi_->setDecimals(5);
+  spnPidKi_->setSingleStep(0.001);
+  spnPidKi_->setValue(0.005);
+  spnPidKi_->setSuffix(" kg/s/\xC2\xB0""C/s");
+  connect(spnPidKi_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &MainWindow::onParameterChanged);
+  formPid->addRow("K\xE1\xB5\xA2 (integral):", spnPidKi_);
+
+  spnPidKd_ = new QDoubleSpinBox(this);
+  spnPidKd_->setRange(0.0, 5.0);
+  spnPidKd_->setDecimals(4);
+  spnPidKd_->setSingleStep(0.01);
+  spnPidKd_->setValue(0.0);
+  spnPidKd_->setSuffix(" kg\xC2\xB7s/\xC2\xB0""C");
+  connect(spnPidKd_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &MainWindow::onParameterChanged);
+  formPid->addRow("K\xE1\xB5\x88 (derivative):", spnPidKd_);
+
+  spnPidUMin_ = new QDoubleSpinBox(this);
+  spnPidUMin_->setRange(0.01, 10.0);
+  spnPidUMin_->setDecimals(2);
+  spnPidUMin_->setSingleStep(0.05);
+  spnPidUMin_->setValue(0.1);
+  spnPidUMin_->setSuffix(" kg/s");
+  connect(spnPidUMin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &MainWindow::onParameterChanged);
+  formPid->addRow("u min:", spnPidUMin_);
+
+  spnPidUMax_ = new QDoubleSpinBox(this);
+  spnPidUMax_->setRange(0.1, 20.0);
+  spnPidUMax_->setDecimals(2);
+  spnPidUMax_->setSingleStep(0.1);
+  spnPidUMax_->setValue(5.0);
+  spnPidUMax_->setSuffix(" kg/s");
+  connect(spnPidUMax_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &MainWindow::onParameterChanged);
+  formPid->addRow("u max:", spnPidUMax_);
+
+  layout->addWidget(grpPid_);
 
   // === LIMITS ===
   auto *grpLimits = new QGroupBox("Operating Limits", this);
@@ -714,9 +874,11 @@ void MainWindow::createChartTabs() {
   chartHeat_ = new ChartWidget(ChartWidget::HEAT_DUTY, this);
   chartPressure_ = new ChartWidget(ChartWidget::PRESSURE, this);
   chartFouling_ = new ChartWidget(ChartWidget::FOULING, this);
+  chartPID_ = new ChartWidget(ChartWidget::PID_CONTROL, this);
   exchWidget_ = new HeatExchangerWidget(this);
   exchWidget_->setGeometryData(geom_);
   exchWidget_->setOperatingPoint(op_);
+  kpiPanel_ = new KPIPanel(this);
 
   // Connect flow control signals from the visualization widget back to spinboxes
   connect(exchWidget_, &HeatExchangerWidget::hotFlowRateChanged, this, [this](double val) {
@@ -735,7 +897,9 @@ void MainWindow::createChartTabs() {
   chartTabs_->addTab(chartHeat_, "Heat Duty & U");
   chartTabs_->addTab(chartPressure_, "Pressure Drops");
   chartTabs_->addTab(chartFouling_, "Fouling");
+  chartTabs_->addTab(chartPID_, "PID Control");
   chartTabs_->addTab(exchWidget_, "Heat Exchanger View");
+  chartTabs_->addTab(kpiPanel_, "KPI Dashboard");
 }
 
 void MainWindow::applyModernStyle() {
@@ -1009,6 +1173,36 @@ void MainWindow::updateSimulationCore() {
   simConfig_.dt = spnTimeStep_->value();
   simConfig_.tEnd = spnDuration_->value();
 
+  // OPERATING LIMITS (used by KPI margin calculations and validators)
+  simConfig_.limits.dP_tube_max     = spnMaxTubePressureDrop_->value();
+  simConfig_.limits.dP_shell_max    = spnMaxShellPressureDrop_->value();
+  simConfig_.limits.m_dot_cold_min  = spnMinColdFlowRate_->value();
+  simConfig_.limits.m_dot_cold_max  = spnMaxColdFlowRate_->value();
+
+  // FLOW ARRANGEMENT (ε–NTU / LMTD-F factor)
+  simConfig_.arrangement = cmbFlowArrangement_
+      ? static_cast<hx::FlowArrangement>(cmbFlowArrangement_->currentData().toInt())
+      : hx::FlowArrangement::CounterFlow;
+
+  // FLUID PRESETS (feeds T-dependent property library)
+  simConfig_.hotPreset  = cmbHotPreset_
+      ? static_cast<hx::FluidPreset>(cmbHotPreset_->currentData().toInt())
+      : hx::FluidPreset::Custom;
+  simConfig_.coldPreset = cmbColdPreset_
+      ? static_cast<hx::FluidPreset>(cmbColdPreset_->currentData().toInt())
+      : hx::FluidPreset::Custom;
+  simConfig_.hotCustom  = hot_;
+  simConfig_.coldCustom = cold_;
+
+  // PID CONTROLLER
+  simConfig_.pid.enabled        = grpPid_ ? grpPid_->isChecked() : false;
+  simConfig_.pid.setpoint_Tc_out = spnPidSetpoint_ ? spnPidSetpoint_->value() : 45.0;
+  simConfig_.pid.kp             = spnPidKp_ ? spnPidKp_->value() : 0.05;
+  simConfig_.pid.ki             = spnPidKi_ ? spnPidKi_->value() : 0.005;
+  simConfig_.pid.kd             = spnPidKd_ ? spnPidKd_->value() : 0.0;
+  simConfig_.pid.u_min          = spnPidUMin_ ? spnPidUMin_->value() : 0.1;
+  simConfig_.pid.u_max          = spnPidUMax_ ? spnPidUMax_->value() : 5.0;
+
   // Recreate simulation objects with updated parameters
   thermo_ = std::make_unique<hx::Thermo>(geom_, hot_, cold_);
   hydro_ = std::make_unique<hx::Hydraulics>(geom_, hot_, cold_);
@@ -1041,6 +1235,9 @@ void MainWindow::onStart() {
   chartHeat_->clear();
   chartPressure_->clear();
   chartFouling_->clear();
+  if (chartPID_) chartPID_->clear();
+  if (kpiPanel_) kpiPanel_->reset();
+  U_clean_baseline_ = 0.0;
   simulationData_.clear();
 
   // Create simulator
@@ -1078,6 +1275,8 @@ void MainWindow::onStart() {
   btnPause_->setEnabled(true);
   btnStop_->setEnabled(true);
   btnExport_->setEnabled(false);
+  btnSnapshot_->setEnabled(false);
+  btnReport_->setEnabled(false);
   isPaused_ = false;
   lblStatus_->setText("Running");
   lblStatus_->setStyleSheet("color: #e67e22; font-weight: bold; font-size: 10pt;");
@@ -1113,8 +1312,19 @@ void MainWindow::onSimulationSample(double t, const hx::State& state) {
   chartHeat_->addSample(t, state);
   chartPressure_->addSample(t, state);
   chartFouling_->addSample(t, state);
+  if (chartPID_) {
+    chartPID_->addSample(t, state, state.pidSetpoint, state.pidColdFlow);
+  }
   if (exchWidget_) {
     exchWidget_->updateSimulationState(state);
+  }
+  if (kpiPanel_) {
+    // Capture clean-U baseline once, at first valid sample of the run.
+    if (U_clean_baseline_ <= 0.0 && state.U > 0.0 && state.Rf <= 1e-9) {
+      U_clean_baseline_ = state.U;
+    }
+    const double baseline = (U_clean_baseline_ > 0.0) ? U_clean_baseline_ : state.U;
+    kpiPanel_->update(state, op_, hot_, cold_, geom_, simConfig_.limits, baseline);
   }
 }
 
@@ -1123,6 +1333,9 @@ void MainWindow::onSimulationFinished() {
   btnPause_->setEnabled(false);
   btnStop_->setEnabled(false);
   btnExport_->setEnabled(true);
+  const bool haveData = !simulationData_.empty();
+  btnSnapshot_->setEnabled(haveData);
+  btnReport_->setEnabled(haveData);
   if (exchWidget_) exchWidget_->setSimulationRunning(false);
   lblStatus_->setText("Complete");
   lblStatus_->setStyleSheet("color: #27ae60; font-weight: bold; font-size: 10pt;");
@@ -1165,6 +1378,13 @@ void MainWindow::onReset() {
   chartHeat_->clear();
   chartPressure_->clear();
   chartFouling_->clear();
+  if (chartPID_) chartPID_->clear();
+  if (kpiPanel_) kpiPanel_->reset();
+  U_clean_baseline_ = 0.0;
+  simulationData_.clear();
+  btnExport_->setEnabled(false);
+  btnSnapshot_->setEnabled(false);
+  btnReport_->setEnabled(false);
 
   statusBar()->showMessage("Reset to default values", 3000);
 }
@@ -1263,9 +1483,239 @@ void MainWindow::onExportData() {
   
   file.close();
   statusBar()->showMessage(QString("Data exported to %1").arg(filename), 5000);
-  QMessageBox::information(this, "Export Complete", 
+  QMessageBox::information(this, "Export Complete",
                           QString("Simulation data exported to:\n%1\n\n%2 data points saved.")
                           .arg(filename).arg(simulationData_.size()));
+}
+
+void MainWindow::onSnapshotBaseline() {
+  if (simulationData_.empty()) {
+    statusBar()->showMessage("Run a simulation first before capturing a baseline", 4000);
+    return;
+  }
+  chartTemp_->captureBaseline();
+  chartHeat_->captureBaseline();
+  chartPressure_->captureBaseline();
+  chartFouling_->captureBaseline();
+  if (chartPID_) chartPID_->captureBaseline();
+  btnClearBaseline_->setEnabled(true);
+  statusBar()->showMessage(
+      "Baseline captured - next run overlays dashed reference traces on all charts", 5000);
+}
+
+void MainWindow::onClearBaseline() {
+  chartTemp_->clearBaseline();
+  chartHeat_->clearBaseline();
+  chartPressure_->clearBaseline();
+  chartFouling_->clearBaseline();
+  if (chartPID_) chartPID_->clearBaseline();
+  btnClearBaseline_->setEnabled(false);
+  statusBar()->showMessage("Baseline overlay cleared", 3000);
+}
+
+namespace {
+
+QString fluidPresetLabel(hx::FluidPreset p) {
+  switch (p) {
+    case hx::FluidPreset::Water:             return QStringLiteral("Water (IAPWS-IF97 fit)");
+    case hx::FluidPreset::EthyleneGlycol30:  return QStringLiteral("Ethylene Glycol 30%");
+    case hx::FluidPreset::EthyleneGlycol50:  return QStringLiteral("Ethylene Glycol 50%");
+    case hx::FluidPreset::EngineOilSAE30:    return QStringLiteral("Engine Oil SAE30");
+    case hx::FluidPreset::AirSTP:            return QStringLiteral("Air (Sutherland)");
+    case hx::FluidPreset::Custom:
+    default:                                 return QStringLiteral("Custom (user-specified)");
+  }
+}
+
+QString arrangementLabel(hx::FlowArrangement a) {
+  switch (a) {
+    case hx::FlowArrangement::CounterFlow:   return QStringLiteral("Counter-flow (pure)");
+    case hx::FlowArrangement::ParallelFlow:  return QStringLiteral("Parallel-flow (co-current)");
+    case hx::FlowArrangement::ShellTube_1_2: return QStringLiteral("Shell-&-Tube 1-2 (TEMA, Bowman F)");
+    case hx::FlowArrangement::ShellTube_2_4: return QStringLiteral("Shell-&-Tube 2-4 (TEMA, Bowman F)");
+  }
+  return QStringLiteral("Unknown");
+}
+
+QString htmlRow(const QString &label, const QString &value, const QString &unit = QString()) {
+  const QString unitHtml = unit.isEmpty() ? QString() : QStringLiteral(" <span class=\"u\">%1</span>").arg(unit);
+  return QStringLiteral("<tr><th>%1</th><td>%2%3</td></tr>").arg(label, value, unitHtml);
+}
+
+QString fmt(double v, int prec = 3) {
+  if (!std::isfinite(v)) return QStringLiteral("—");
+  return QLocale::c().toString(v, 'g', prec);
+}
+
+} // namespace
+
+void MainWindow::onGenerateReport() {
+  if (simulationData_.empty()) {
+    QMessageBox::information(this, "No Data",
+        "Run a simulation first - the report needs final-state values to summarise.");
+    return;
+  }
+
+  const QString suggested = QStringLiteral("HeatXTwin_Report_%1.html")
+      .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+  const QString filename = QFileDialog::getSaveFileName(
+      this, "Save Simulation Report", suggested, "HTML Files (*.html)");
+  if (filename.isEmpty()) return;
+
+  QFile file(filename);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    QMessageBox::critical(this, "Error", "Could not open file for writing.");
+    return;
+  }
+
+  const auto &[t_final, s_final] = simulationData_.back();
+  const double dT_hot  = op_.Tin_hot  - s_final.Th_out;
+  const double dT_cold = s_final.Tc_out - op_.Tin_cold;
+  const double Ch = op_.m_dot_hot  * hot_.cp;
+  const double Cc = op_.m_dot_cold * cold_.cp;
+  const double Cmin = std::min(Ch, Cc);
+  const double Cmax = std::max(Ch, Cc);
+  const double Cr   = (Cmax > 0.0) ? Cmin / Cmax : 0.0;
+  const double Qmax = (Cmin > 0.0) ? Cmin * (op_.Tin_hot - op_.Tin_cold) : 0.0;
+  const double eps  = (Qmax > 1e-9) ? s_final.Q / Qmax : 0.0;
+  const double NTU  = (Cmin > 0.0 && s_final.U > 0.0)
+                        ? (s_final.U * geom_.areaOuter()) / Cmin : 0.0;
+  const double U_clean = (U_clean_baseline_ > 0.0) ? U_clean_baseline_ : s_final.U;
+  const double foulingPenalty = (U_clean > 0.0) ? 100.0 * (1.0 - s_final.U / U_clean) : 0.0;
+
+  QTextStream out(&file);
+  out.setEncoding(QStringConverter::Utf8);
+
+  out << "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"UTF-8\">\n";
+  out << "<title>HeatXTwin Simulation Report</title>\n";
+  out << "<style>\n"
+         "  body{font-family:'Segoe UI',Roboto,sans-serif;max-width:960px;margin:2em auto;color:#222;line-height:1.45;padding:0 1em;}\n"
+         "  h1{color:#2c3e50;border-bottom:3px solid #3498db;padding-bottom:6px;}\n"
+         "  h2{color:#2c3e50;margin-top:1.6em;border-left:4px solid #3498db;padding-left:10px;}\n"
+         "  table{border-collapse:collapse;width:100%;margin:8px 0 18px 0;}\n"
+         "  th,td{border:1px solid #d5dae0;padding:6px 10px;text-align:left;font-size:10.5pt;}\n"
+         "  th{background:#ecf0f1;width:40%;font-weight:600;color:#34495e;}\n"
+         "  td{background:#fdfdfe;}\n"
+         "  .u{color:#7f8c8d;font-size:9.5pt;margin-left:4px;}\n"
+         "  .kpi{display:inline-block;min-width:180px;padding:10px 14px;margin:4px 6px 4px 0;\n"
+         "       background:#f4f8fb;border-left:4px solid #3498db;border-radius:2px;}\n"
+         "  .kpi .lbl{font-size:9pt;color:#7f8c8d;text-transform:uppercase;letter-spacing:0.04em;}\n"
+         "  .kpi .val{font-size:15pt;color:#2c3e50;font-weight:600;font-family:'Cambria Math',serif;}\n"
+         "  .formula{font-family:'Cambria Math','Latin Modern Math',serif;font-style:italic;color:#2c3e50;\n"
+         "           background:#fafbfc;padding:4px 8px;border-radius:3px;display:inline-block;}\n"
+         "  footer{margin-top:2.4em;padding-top:10px;border-top:1px solid #d5dae0;color:#7f8c8d;font-size:9pt;text-align:center;}\n"
+         "</style></head><body>\n";
+
+  out << "<h1>HeatXTwin Digital Twin - Simulation Report</h1>\n";
+  out << "<p>Generated <b>"
+      << QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
+      << "</b> &middot; Mode <b>" << simulationModeLabel(simulationMode_)
+      << "</b> &middot; Duration <b>" << fmt(t_final, 4) << " s</b> &middot; "
+      << "<b>" << simulationData_.size() << "</b> samples</p>\n";
+
+  out << "<h2>Key Performance Indicators (final state)</h2>\n";
+  out << "<div>";
+  out << QStringLiteral("<div class=\"kpi\"><div class=\"lbl\">Heat duty Q</div><div class=\"val\">%1 W</div></div>").arg(fmt(s_final.Q, 4));
+  out << QStringLiteral("<div class=\"kpi\"><div class=\"lbl\">Overall U</div><div class=\"val\">%1 W/m&sup2;&middot;K</div></div>").arg(fmt(s_final.U, 4));
+  out << QStringLiteral("<div class=\"kpi\"><div class=\"lbl\">Effectiveness &epsilon;</div><div class=\"val\">%1</div></div>").arg(fmt(eps, 4));
+  out << QStringLiteral("<div class=\"kpi\"><div class=\"lbl\">NTU</div><div class=\"val\">%1</div></div>").arg(fmt(NTU, 4));
+  out << QStringLiteral("<div class=\"kpi\"><div class=\"lbl\">C<sub>r</sub> = C<sub>min</sub>/C<sub>max</sub></div><div class=\"val\">%1</div></div>").arg(fmt(Cr, 4));
+  out << QStringLiteral("<div class=\"kpi\"><div class=\"lbl\">Fouling penalty</div><div class=\"val\">%1 %</div></div>").arg(fmt(foulingPenalty, 3));
+  out << QStringLiteral("<div class=\"kpi\"><div class=\"lbl\">&Delta;P tube</div><div class=\"val\">%1 Pa</div></div>").arg(fmt(s_final.dP_tube, 4));
+  out << QStringLiteral("<div class=\"kpi\"><div class=\"lbl\">&Delta;P shell</div><div class=\"val\">%1 Pa</div></div>").arg(fmt(s_final.dP_shell, 4));
+  out << QStringLiteral("<div class=\"kpi\"><div class=\"lbl\">R<sub>f</sub></div><div class=\"val\">%1 m&sup2;&middot;K/W</div></div>").arg(fmt(s_final.Rf, 3));
+  out << "</div>\n";
+  out << "<p>&epsilon; computed from <span class=\"formula\">&epsilon; = Q / (C<sub>min</sub>&middot;&Delta;T<sub>in</sub>)</span>; "
+         "NTU from <span class=\"formula\">NTU = UA / C<sub>min</sub></span>.</p>\n";
+
+  out << "<h2>Flow arrangement &amp; fluid models</h2><table>\n";
+  out << htmlRow("Flow arrangement",  arrangementLabel(simConfig_.arrangement));
+  out << htmlRow("Hot-side model",    fluidPresetLabel(simConfig_.hotPreset));
+  out << htmlRow("Cold-side model",   fluidPresetLabel(simConfig_.coldPreset));
+  out << htmlRow("PID control loop",  simConfig_.pid.enabled ? QStringLiteral("ENABLED - regulating m&#775;<sub>cold</sub> to track T<sub>c,out</sub>")
+                                                              : QStringLiteral("Disabled"));
+  if (simConfig_.pid.enabled) {
+    out << htmlRow("PID setpoint T<sub>c,out</sub>", fmt(simConfig_.pid.setpoint_Tc_out, 3), "&deg;C");
+    out << htmlRow("PID gains (Kp, Ki, Kd)",
+                    QStringLiteral("%1 / %2 / %3").arg(fmt(simConfig_.pid.kp,3), fmt(simConfig_.pid.ki,3), fmt(simConfig_.pid.kd,3)));
+    out << htmlRow("Actuator limits",
+                    QStringLiteral("[%1, %2]").arg(fmt(simConfig_.pid.u_min,3), fmt(simConfig_.pid.u_max,3)), "kg/s");
+  }
+  out << "</table>\n";
+
+  out << "<h2>Operating point (initial)</h2><table>\n";
+  out << htmlRow("m&#775;<sub>hot</sub>",   fmt(op_.m_dot_hot, 4),  "kg/s");
+  out << htmlRow("m&#775;<sub>cold</sub>",  fmt(op_.m_dot_cold, 4), "kg/s");
+  out << htmlRow("T<sub>in,hot</sub>",      fmt(op_.Tin_hot, 4),    "&deg;C");
+  out << htmlRow("T<sub>in,cold</sub>",     fmt(op_.Tin_cold, 4),   "&deg;C");
+  out << htmlRow("T<sub>out,hot</sub> (final)", fmt(s_final.Th_out, 4), "&deg;C");
+  out << htmlRow("T<sub>out,cold</sub> (final)", fmt(s_final.Tc_out, 4), "&deg;C");
+  out << htmlRow("Hot-side &Delta;T",       fmt(dT_hot, 4),         "K");
+  out << htmlRow("Cold-side &Delta;T",      fmt(dT_cold, 4),        "K");
+  out << htmlRow("C<sub>h</sub> = m&#775;<sub>h</sub>&middot;c<sub>p,h</sub>", fmt(Ch, 4), "W/K");
+  out << htmlRow("C<sub>c</sub> = m&#775;<sub>c</sub>&middot;c<sub>p,c</sub>", fmt(Cc, 4), "W/K");
+  out << "</table>\n";
+
+  out << "<h2>Geometry</h2><table>\n";
+  out << htmlRow("Number of tubes",   QString::number(geom_.nTubes));
+  out << htmlRow("Tube ID / OD",      QStringLiteral("%1 / %2").arg(fmt(geom_.Di*1000,4), fmt(geom_.Do*1000,4)), "mm");
+  out << htmlRow("Tube length",       fmt(geom_.L, 4),         "m");
+  out << htmlRow("Pitch",             fmt(geom_.pitch*1000, 4),"mm");
+  out << htmlRow("Shell ID",          fmt(geom_.shellID*1000,4),"mm");
+  out << htmlRow("Baffle spacing",    fmt(geom_.baffleSpacing*1000,4), "mm");
+  out << htmlRow("Baffle cut fraction", fmt(geom_.baffleCutFrac, 3));
+  out << htmlRow("Number of baffles", QString::number(geom_.nBaffles));
+  out << htmlRow("Wall k / thickness",
+                  QStringLiteral("%1 W/m&middot;K / %2 mm").arg(fmt(geom_.wall_k,4), fmt(geom_.wall_thickness*1000,4)));
+  out << htmlRow("Outer heat-transfer area A", fmt(geom_.areaOuter(), 4), "m&sup2;");
+  out << "</table>\n";
+
+  out << "<h2>Fluid properties (as supplied)</h2><table>\n";
+  out << htmlRow("Hot &rho; / &mu; / c<sub>p</sub> / k",
+                  QStringLiteral("%1 kg/m&sup3; / %2 Pa&middot;s / %3 J/kg&middot;K / %4 W/m&middot;K")
+                    .arg(fmt(hot_.rho,4), fmt(hot_.mu,4), fmt(hot_.cp,4), fmt(hot_.k,4)));
+  out << htmlRow("Cold &rho; / &mu; / c<sub>p</sub> / k",
+                  QStringLiteral("%1 kg/m&sup3; / %2 Pa&middot;s / %3 J/kg&middot;K / %4 W/m&middot;K")
+                    .arg(fmt(cold_.rho,4), fmt(cold_.mu,4), fmt(cold_.cp,4), fmt(cold_.k,4)));
+  out << "</table>\n";
+  if (simConfig_.hotPreset != hx::FluidPreset::Custom || simConfig_.coldPreset != hx::FluidPreset::Custom) {
+    out << "<p><i>Values above are user inputs; temperature-dependent correlations were evaluated each step at the mean film temperature T = (T<sub>in</sub> + T<sub>out</sub>)/2.</i></p>\n";
+  }
+
+  out << "<h2>Fouling model</h2><table>\n";
+  out << htmlRow("Model", foulParams_.model == hx::FoulingParams::Model::Asymptotic
+                           ? QStringLiteral("Kern-Seaton asymptotic: R<sub>f</sub>(t) = R<sub>f,&infin;</sub>(1 - e<sup>-t/&tau;</sup>)")
+                           : QStringLiteral("Linear: R<sub>f</sub>(t) = &alpha;&middot;t"));
+  out << htmlRow("R<sub>f,&infin;</sub>", fmt(foulParams_.RfMax, 4), "m&sup2;&middot;K/W");
+  out << htmlRow("&tau;",                 fmt(foulParams_.tau, 4),   "s");
+  out << htmlRow("&alpha;",               fmt(foulParams_.alpha, 4), "m&sup2;&middot;K/(W&middot;s)");
+  out << htmlRow("Deposit k",             fmt(foulParams_.k_deposit, 3), "W/m&middot;K");
+  out << htmlRow("Shell/Tube split",
+                  QStringLiteral("%1% shell / %2% tube")
+                    .arg(fmt(100.0*foulParams_.split_ratio,3), fmt(100.0*(1.0-foulParams_.split_ratio),3)));
+  out << "</table>\n";
+
+  out << "<h2>Operating limits &amp; margins</h2><table>\n";
+  const double mTube  = (simConfig_.limits.dP_tube_max  > 0.0) ? 100.0*(1.0 - s_final.dP_tube/simConfig_.limits.dP_tube_max)  : 0.0;
+  const double mShell = (simConfig_.limits.dP_shell_max > 0.0) ? 100.0*(1.0 - s_final.dP_shell/simConfig_.limits.dP_shell_max) : 0.0;
+  out << htmlRow("&Delta;P tube limit", fmt(simConfig_.limits.dP_tube_max, 4),  "Pa");
+  out << htmlRow("&Delta;P shell limit",fmt(simConfig_.limits.dP_shell_max, 4), "Pa");
+  out << htmlRow("Tube &Delta;P margin",  fmt(mTube, 3),  "% of limit remaining");
+  out << htmlRow("Shell &Delta;P margin", fmt(mShell, 3), "% of limit remaining");
+  out << "</table>\n";
+
+  out << "<footer>Produced by HeatXTwin Pro 2.0 - educational digital twin of a shell-and-tube heat exchanger.<br>"
+         "Formulas follow Incropera/DeWitt, Kern, and Bowman (1936); see source for references.</footer>\n";
+  out << "</body></html>\n";
+  file.close();
+
+  statusBar()->showMessage(QString("Report written to %1").arg(filename), 5000);
+  const auto reply = QMessageBox::information(this, "Report Generated",
+      QStringLiteral("HTML report saved to:\n%1\n\nOpen it now in the default browser?").arg(filename),
+      QMessageBox::Yes | QMessageBox::No);
+  if (reply == QMessageBox::Yes) {
+    QDesktopServices::openUrl(QUrl::fromLocalFile(filename));
+  }
 }
 
 QString MainWindow::simulationModeLabel(SimulationMode mode) {

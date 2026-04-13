@@ -1,8 +1,21 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 namespace hx {
+
+/** \brief Flow arrangement for the ε–NTU / LMTD calculation.
+ *  Counter/Parallel are the limiting single-pass topologies; Shell-&-Tube
+ *  presets implement the Bowman correction factor (F) for multi-pass TEMA
+ *  configurations.
+ */
+enum class FlowArrangement : int {
+  CounterFlow = 0,
+  ParallelFlow,
+  ShellTube_1_2,   // 1 shell pass, 2 (or more) tube passes
+  ShellTube_2_4,   // 2 shell passes, 4 (or more) tube passes
+};
 
 struct Fluid {
   double rho; // density [kg/m^3]
@@ -63,6 +76,10 @@ struct State {
   double Rf;        // [m^2*K/W]
   double dP_tube;   // [Pa]
   double dP_shell;  // [Pa]
+
+  // Controller diagnostics — NaN when PID disabled
+  double pidSetpoint = std::numeric_limits<double>::quiet_NaN();  // [C]  target Tc_out
+  double pidColdFlow = std::numeric_limits<double>::quiet_NaN();  // [kg/s] commanded m_dot_cold
 };
 
 } // namespace hx
