@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 namespace hx {
 
@@ -15,6 +16,17 @@ enum class FlowArrangement : int {
   ParallelFlow,
   ShellTube_1_2,   // 1 shell pass, 2 (or more) tube passes
   ShellTube_2_4,   // 2 shell passes, 4 (or more) tube passes
+};
+
+/** \brief Which shell-side correlation the Thermo & Hydraulics components use.
+ *  Kern (1950) is a compact, simple correlation suited for rough estimates.
+ *  Bell–Delaware (1963) is the industry-standard segmented approach, breaking
+ *  the shell flow into ideal crossflow modified by baffle-cut, leakage,
+ *  bundle-bypass and laminar corrections.
+ */
+enum class ShellSideMethod : int {
+  Kern         = 0,
+  BellDelaware = 1,
 };
 
 struct Fluid {
@@ -79,7 +91,22 @@ struct State {
 
   // Controller diagnostics — NaN when PID disabled
   double pidSetpoint = std::numeric_limits<double>::quiet_NaN();  // [C]  target Tc_out
-  double pidColdFlow = std::numeric_limits<double>::quiet_NaN();  // [kg/s] commanded m_dot_cold
+  double pidColdFlow = std::numeric_limits<double>::quiet_NaN();  // [kg/s] commanded m_dot_cold (pre-actuator)
+
+  // Advanced control diagnostics (NaN when inactive).
+  //   pidFFterm          — feed-forward contribution to m_dot_cold command [kg/s]
+  //   pidFBterm          — feedback (PID) contribution to m_dot_cold command [kg/s]
+  //   pidColdFlowActual  — actuator-lag-filtered cold flow that actually reaches the exchanger [kg/s]
+  double pidFFterm         = std::numeric_limits<double>::quiet_NaN();
+  double pidFBterm         = std::numeric_limits<double>::quiet_NaN();
+  double pidColdFlowActual = std::numeric_limits<double>::quiet_NaN();
+
+  // Axial temperature profile (finite-volume discretization).
+  // Both vectors share cell indexing 0..N-1 where x=0 is the HOT inlet side
+  // and x=L is the HOT outlet side (i.e. the flow direction of the hot fluid).
+  // Empty when the simulator runs in lumped mode (numAxialCells <= 1).
+  std::vector<double> Th_axial;   // hot-side temperature at each cell [C]
+  std::vector<double> Tc_axial;   // cold-side temperature at each cell [C]
 };
 
 } // namespace hx

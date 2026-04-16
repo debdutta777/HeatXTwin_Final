@@ -516,23 +516,41 @@ void HeatExchangerWidget::drawTubes(QPainter &p) {
   double tubeLen = shellW_ - 12;
   double tubeStartX = shellX_ + 6;
 
+  // Whether we have a proper axial T(x) profile from the finite-volume model.
+  const bool haveAxial = hasState_ && !state_.Th_axial.empty();
+  const double Tspan = std::max(1.0, op_.Tin_hot - op_.Tin_cold);
+
   for (int i = 0; i < visibleTubes_; ++i) {
     double cy = shellY_ + tubeSpacing * (i + 1);
 
-    // Temperature gradient along tube length
     QLinearGradient tubeGrad(tubeStartX, cy, tubeStartX + tubeLen, cy);
-    QColor cStart = hotColor(0.0);  // inlet (hot)
-    QColor cEnd = hotColor(1.0);    // outlet (cooler)
 
-    // If we have simulation state, adjust colors
-    if (hasState_) {
-      double tempRange = std::max(1.0, op_.Tin_hot - op_.Tin_cold);
-      double normT = (state_.Th_out - op_.Tin_cold) / tempRange;
-      cEnd = lerpColor(kHotOutlet, QColor(255, 200, 100), 1.0 - normT);
+    if (haveAxial) {
+      // Paint an actual T(x) gradient derived from the axial cell array:
+      // index 0 = hot inlet side (x=0), index N-1 = hot outlet side (x=L).
+      const int N = static_cast<int>(state_.Th_axial.size());
+      for (int k = 0; k < N; ++k) {
+        const double x = (N == 1) ? 0.5 : static_cast<double>(k) / (N - 1);
+        const double Tk = state_.Th_axial[static_cast<size_t>(k)];
+        // Normalize into [0,1] with 1 = hot, 0 = cold. Clamp so disturbance
+        // overshoots don't blow the color map out of range.
+        double normT = (Tk - op_.Tin_cold) / Tspan;
+        normT = std::max(0.0, std::min(1.0, normT));
+        // hotColor(t) is parameterised so t=0 is hottest, t=1 is coolest.
+        const QColor c = hotColor(1.0 - normT);
+        tubeGrad.setColorAt(x, c);
+      }
+    } else {
+      // Lumped / pre-simulation fallback: 2-stop gradient inlet → outlet.
+      QColor cStart = hotColor(0.0);
+      QColor cEnd = hotColor(1.0);
+      if (hasState_) {
+        double normT = (state_.Th_out - op_.Tin_cold) / Tspan;
+        cEnd = lerpColor(kHotOutlet, QColor(255, 200, 100), 1.0 - normT);
+      }
+      tubeGrad.setColorAt(0.0, cStart);
+      tubeGrad.setColorAt(1.0, cEnd);
     }
-
-    tubeGrad.setColorAt(0.0, cStart);
-    tubeGrad.setColorAt(1.0, cEnd);
 
     // Draw tube with gradient
     double tubeThick = std::max(3.0, tubeSpacing * 0.28);
@@ -561,25 +579,31 @@ void HeatExchangerWidget::drawFoulingLayer(QPainter &p) {
   QColor foulingCol = kFoulingColor;
   foulingCol.setAlphaF(0.3 + 0.5 * foulingFraction_);
 
-  for (int i = 0; i < visibleTubes_; ++i) {
-    double cy = shellY_ + tubeSpacing * (i + 1);
-    double tubeThick = std::max(3.0, tubeSpacing * 0.28);
+  // tubeThick and the base alpha are loop-invariant — hoist them once so the
+  // inner dx loop (hundreds of iterations per tube) avoids repeated max() and
+  // QColor::alphaF() calls on every step.
+  const double tubeThick = std::max(3.0, tubeSpacing * 0.28);
+  const double halfThick = tubeThick * 0.5;
+  const double baseAlpha = foulingCol.alphaF();
 
-    // Fouling pattern - slightly irregular
-    p.setPen(Qt::NoPen);
+  p.setPen(Qt::NoPen);
+  for (int i = 0; i < visibleTubes_; ++i) {
+    const double cy = shellY_ + tubeSpacing * (i + 1);
+    const double phase1 = i * 1.7;
+    const double phase2 = static_cast<double>(i);
 
     // Draw fouling as a rough coating
     for (double dx = 0; dx < tubeLen; dx += 3.0) {
-      double localFoul = foulingThick * (0.7 + 0.3 * std::sin(dx * 0.15 + i * 1.7));
-      double x = tubeStartX + dx;
+      const double localFoul = foulingThick * (0.7 + 0.3 * std::sin(dx * 0.15 + phase1));
+      const double x = tubeStartX + dx;
       QColor c = foulingCol;
-      c.setAlphaF(foulingCol.alphaF() * (0.6 + 0.4 * std::sin(dx * 0.08 + i)));
+      c.setAlphaF(baseAlpha * (0.6 + 0.4 * std::sin(dx * 0.08 + phase2)));
 
       p.setBrush(c);
       // Top fouling
-      p.drawRect(QRectF(x, cy - tubeThick / 2 - localFoul, 3.0, localFoul));
+      p.drawRect(QRectF(x, cy - halfThick - localFoul, 3.0, localFoul));
       // Bottom fouling
-      p.drawRect(QRectF(x, cy + tubeThick / 2, 3.0, localFoul));
+      p.drawRect(QRectF(x, cy + halfThick, 3.0, localFoul));
     }
   }
 }
@@ -846,9 +870,12 @@ void HeatExchangerWidget::drawLabels(QPainter &p) {
   QFont labelFont("Segoe UI", 8, QFont::Bold);
   p.setFont(labelFont);
 
+  // QFontMetrics construction queries the font cache — hoist it out of the
+  // lambda so the nine label calls below share a single instance per paint.
+  const QFontMetrics fm(labelFont);
+
   auto drawLabel = [&](const QString &text, double x, double y,
                         const QColor &textCol = kLabelColor) {
-    QFontMetrics fm(labelFont);
     QRectF textRect = fm.boundingRect(text);
     double pad = 4;
     QRectF bgRect(x - textRect.width() / 2 - pad, y - textRect.height() / 2 - pad,

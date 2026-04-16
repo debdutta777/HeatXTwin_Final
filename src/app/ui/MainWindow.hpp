@@ -6,6 +6,7 @@
 #include <QSpinBox>
 #include <QPushButton>
 #include <QLabel>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QThread>
 #include <QTimer>
@@ -22,8 +23,10 @@
 class ChartWidget;
 class HeatExchangerWidget;
 class KPIPanel;
+class SpectrumWidget;
 class SimWorker;
 class QGroupBox;
+class FoulingMapDialog;
 
 /**
  * @brief Modern redesigned main window with tabbed charts and full UI parameter editing
@@ -60,6 +63,11 @@ private slots:
   void onSnapshotBaseline();
   void onClearBaseline();
   void onGenerateReport();
+  void onAutoTunePid();
+  void onMonteCarlo();
+  void onVibrationCheck();
+  void onFoulingHeatmap();
+  void onRunLog();
   void onParameterChanged();
   void onGeometryDebounceTimeout();
   void onSimulationSample(double t, const hx::State& state);
@@ -91,11 +99,16 @@ private:
   QPushButton *btnSnapshot_{};
   QPushButton *btnClearBaseline_{};
   QPushButton *btnReport_{};
+  QPushButton *btnMonteCarlo_{};
+  QPushButton *btnVibration_{};
+  QPushButton *btnHeatmap_{};
+  QPushButton *btnRunLog_{};
   QLabel *lblStatus_{};
   QDoubleSpinBox *spnDuration_{};
   QDoubleSpinBox *spnTimeStep_{};
   QComboBox *cmbSpeed_{};
   QComboBox *cmbSimulationMode_{};
+  QComboBox *cmbScenario_{};
 
   // === OPERATING PARAMETERS (LEFT PANEL) ===
   QDoubleSpinBox *spnHotFlowRate_{};
@@ -130,6 +143,7 @@ private:
   QDoubleSpinBox *spnWallConductivity_{};
   QDoubleSpinBox *spnWallThickness_{};
   QComboBox *cmbFlowArrangement_{};
+  QComboBox *cmbShellMethod_{};
 
   // === FOULING PARAMETERS (LEFT PANEL) ===
   QDoubleSpinBox *spnRf0_{};
@@ -154,6 +168,14 @@ private:
   QDoubleSpinBox *spnPidUMin_{};
   QDoubleSpinBox *spnPidUMax_{};
 
+  // Feed-forward + cascade (B5)
+  QCheckBox      *chkFFEnabled_{};
+  QCheckBox      *chkFFAutoEB_{};
+  QDoubleSpinBox *spnFFkTin_{};
+  QDoubleSpinBox *spnFFkFlow_{};
+  QCheckBox      *chkCascadeEnabled_{};
+  QDoubleSpinBox *spnTauValve_{};
+
   // === CHART TABS (RIGHT PANEL) ===
   QTabWidget *chartTabs_{};
   ChartWidget *chartTemp_{};       // Temperatures (20-100°C)
@@ -163,6 +185,7 @@ private:
   ChartWidget *chartPID_{};        // PID setpoint tracking + cold-flow command
   HeatExchangerWidget *exchWidget_{};
   KPIPanel *kpiPanel_{};
+  SpectrumWidget *spectrumWidget_{};
   double U_clean_baseline_{0.0};   // Captured at simulation start for fouling penalty
 
   // === SIMULATION CORE ===
@@ -187,5 +210,11 @@ private:
   bool isRunning_{false};
   bool isPaused_{false};
   std::vector<std::pair<double, hx::State>> simulationData_;  // For export
+
+  // Live per-tube fouling heatmap dialog (non-modal).  When open, simulation
+  // samples push fresh FoulingMap snapshots through updateMap() so the user
+  // sees fouling evolve in real time instead of a frozen t=0 picture.
+  FoulingMapDialog *heatmapDlg_{};
+  int               heatmapSampleCounter_{0};
 };
 

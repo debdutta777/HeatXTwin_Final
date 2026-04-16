@@ -68,38 +68,44 @@ void CustomChartView::mouseMoveEvent(QMouseEvent *event) {
     // Pass to base class for hover events
     QChartView::mouseMoveEvent(event);
     
-    // Update tooltip with nearest point
-    QPointF chartPos = chart()->mapToValue(event->pos());
-    
-    // Build tooltip text by checking all series
+    // Update tooltip with nearest point.  Samples are monotonically
+    // increasing in t, so binary-search once per series instead of an O(n)
+    // linear scan of a by-value copy of the full point list.
+    const QPointF chartPos = chart()->mapToValue(event->pos());
+
     QString tooltipText;
-    foreach (auto series, chart()->series()) {
-      if (auto lineSeries = qobject_cast<QLineSeries*>(series)) {
-        // Find closest point
-        double minDist = 1e9;
-        QPointF closestPoint;
-        bool foundPoint = false;
-        
-        for (const QPointF& point : lineSeries->points()) {
-          double dist = qAbs(point.x() - chartPos.x());
-          if (dist < minDist) {
-            minDist = dist;
-            closestPoint = point;
-            foundPoint = true;
-          }
-        }
-        
-        // If point is close enough (within 5% of x-axis range)
-        if (foundPoint && minDist < (chart()->plotArea().width() * 0.05)) {
-          if (!tooltipText.isEmpty()) tooltipText += "\n\n";
-          tooltipText += QString("<b>%1</b><br/>Time: %2 s<br/>Value: %3")
-                         .arg(lineSeries->name())
-                         .arg(closestPoint.x(), 0, 'f', 2)
-                         .arg(closestPoint.y(), 0, 'f', 3);
-        }
+    const auto allSeries = chart()->series();
+    for (auto *series : allSeries) {
+      auto *lineSeries = qobject_cast<QLineSeries*>(series);
+      if (!lineSeries) continue;
+      const int n = lineSeries->count();
+      if (n == 0) continue;
+
+      const double xq = chartPos.x();
+      int lo = 0, hi = n - 1;
+      while (lo < hi) {
+        const int mid = (lo + hi) >> 1;
+        if (lineSeries->at(mid).x() < xq) lo = mid + 1;
+        else                              hi = mid;
+      }
+      // lo is the first index whose x ≥ xq; check it and its left neighbour.
+      QPointF closest = lineSeries->at(lo);
+      double minDist = std::abs(closest.x() - xq);
+      if (lo > 0) {
+        const QPointF left = lineSeries->at(lo - 1);
+        const double dL = std::abs(left.x() - xq);
+        if (dL < minDist) { closest = left; minDist = dL; }
+      }
+
+      if (minDist < chart()->plotArea().width() * 0.05) {
+        if (!tooltipText.isEmpty()) tooltipText += "\n\n";
+        tooltipText += QString("<b>%1</b><br/>Time: %2 s<br/>Value: %3")
+                       .arg(lineSeries->name())
+                       .arg(closest.x(), 0, 'f', 2)
+                       .arg(closest.y(), 0, 'f', 3);
       }
     }
-    
+
     if (!tooltipText.isEmpty()) {
       setToolTip(tooltipText);
     }
@@ -328,6 +334,8 @@ void ChartWidget::clear() {
   }
   
   sampleCount_ = 0;
+  flowSeenMin_ =  std::numeric_limits<double>::infinity();
+  flowSeenMax_ = -std::numeric_limits<double>::infinity();
 }
 
 void ChartWidget::addSample(double t, const hx::State& state, double pidSetpointTcOut, double coldFlow) {
@@ -361,6 +369,10 @@ void ChartWidget::addSample(double t, const hx::State& state, double pidSetpoint
       if (series3_) {
         const double flow = std::isnan(coldFlow) ? 0.0 : coldFlow;  // No scaling
         series3_->append(t, flow);
+        // Update running min/max incrementally so updateAxes() doesn't
+        // have to copy+scan the entire QLineSeries on each tick.
+        if (flow < flowSeenMin_) flowSeenMin_ = flow;
+        if (flow > flowSeenMax_) flowSeenMax_ = flow;
       }
       break;
   }
@@ -431,25 +443,21 @@ void ChartWidget::updateAxes(double t, const hx::State& state) {
     axisY_->setRange(newMin, newMax);
   }
   
-  // Update right Y-axis for PID control chart with flow rate data
-  if (type_ == PID_CONTROL && axisY2_ && series3_ && series3_->count() > 0) {
-    // Get min/max from flow series data
-    double flowMin = 1e9, flowMax = -1e9;
-    for (const auto& point : series3_->points()) {
-      if (point.y() < flowMin) flowMin = point.y();
-      if (point.y() > flowMax) flowMax = point.y();
-    }
-    
-    if (flowMin < 1e9 && flowMax > -1e9) {
-      double flowRange = flowMax - flowMin;
-      double flowMargin = std::max(flowRange * 0.15, 0.1);
-      double newFlowMin = std::max(minY2_, flowMin - flowMargin);
-      double newFlowMax = std::min(maxY2_, flowMax + flowMargin);
-      
-      if (std::abs(newFlowMin - axisY2_->min()) > flowRange * 0.1 ||
-          std::abs(newFlowMax - axisY2_->max()) > flowRange * 0.1) {
-        axisY2_->setRange(newFlowMin, newFlowMax);
-      }
+  // Update right Y-axis for PID control chart with flow rate data.
+  // Use the running min/max maintained in addSample() so we don't have
+  // to copy & scan series3_->points() (O(n)) every time.
+  if (type_ == PID_CONTROL && axisY2_ && series3_ && series3_->count() > 0 &&
+      std::isfinite(flowSeenMin_) && std::isfinite(flowSeenMax_)) {
+    const double flowMin = flowSeenMin_;
+    const double flowMax = flowSeenMax_;
+    const double flowRange = flowMax - flowMin;
+    const double flowMargin = std::max(flowRange * 0.15, 0.1);
+    const double newFlowMin = std::max(minY2_, flowMin - flowMargin);
+    const double newFlowMax = std::min(maxY2_, flowMax + flowMargin);
+
+    if (std::abs(newFlowMin - axisY2_->min()) > flowRange * 0.1 ||
+        std::abs(newFlowMax - axisY2_->max()) > flowRange * 0.1) {
+      axisY2_->setRange(newFlowMin, newFlowMax);
     }
   }
 }

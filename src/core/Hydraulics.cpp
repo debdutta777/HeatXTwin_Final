@@ -1,4 +1,5 @@
 #include "Hydraulics.hpp"
+#include "BellDelaware.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,9 +17,10 @@ static double friction_factor_tube(double Re) {
     return 1.0; // degenerate
   if (Re < 2300.0)
     return 64.0 / std::max(Re, 1.0);
-  // Blasius correlation for smooth turbulent flow: f = 0.3164 * Re^-0.25
-  // Valid for 4000 < Re < 10^5
-  return 0.3164 * std::pow(Re, -0.25);
+  // Blasius correlation for smooth turbulent flow: f = 0.3164 * Re^-0.25.
+  // Re^-0.25 == 1/sqrt(sqrt(Re)); two sqrts are meaningfully cheaper than pow().
+  const double inv_fourth = 1.0 / std::sqrt(std::sqrt(Re));
+  return 0.3164 * inv_fourth;
 }
 
 static double friction_factor_shell(double Re) {
@@ -50,6 +52,13 @@ double Hydraulics::dP_tube(double m_dot_hot, double Rf_tube, double k_deposit, d
 }
 
 double Hydraulics::dP_shell(double m_dot_cold, double Rf_shell, double k_deposit, double K_turns) const {
+  if (shellMethod_ == ShellSideMethod::BellDelaware) {
+    // Bell–Delaware: Δp = (Nb−1)·Δp_bc·Rb·Rl + Nb·Δp_w·Rl + 2·Δp_bc·(1+Ncw/Nc)·Rb·Rs
+    // The module returns the full sum; K_turns is ignored (not part of BD).
+    (void)K_turns;
+    return computeBellDelaware(g_, cold_, m_dot_cold, Rf_shell, k_deposit).dP_shell;
+  }
+  // --- Legacy Kern-style cross-flow model ---------------------------------
   // Report: "fouling changes the shell-side hydraulic diameter... recalculate Re and velocity"
   
   // 1. Calculate effective diameter with fouling

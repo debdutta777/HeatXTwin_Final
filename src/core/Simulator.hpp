@@ -3,6 +3,8 @@
 #include "Model.hpp"
 #include "ControllerPID.hpp"
 #include "FluidLibrary.hpp"
+#include "Scenario.hpp"
+#include <limits>
 #include <memory>
 
 namespace hx {
@@ -20,6 +22,31 @@ struct PidConfig {
   double u_min = 0.1;              // [kg/s] minimum cold flow
   double u_max = 5.0;              // [kg/s] maximum cold flow
   double rate_limit = 0.5;         // [kg/s/s]
+
+  // --- Feed-forward (B5) ----------------------------------------------------
+  //  u_total  =  u_bias + u_PID(sp - Tc_out)  +  u_FF(measured disturbances)
+  //  u_FF     =  k_ff_Tin  · (Tin_hot  - Tin_hot_nom )
+  //           +  k_ff_flow · (m_hot    - m_hot_nom   )
+  //  When ff_auto_energy_balance is true, both gains are rewritten at reset()
+  //  from the nominal energy balance on the operating point:
+  //      m_c_nom = m_h_nom * cp_h * (Tin_hot_nom - Th_out_target)
+  //                                  / (cp_c * (SP - Tin_cold_nom))
+  //  and ∂m_c/∂Tin_hot, ∂m_c/∂m_h are taken analytically.
+  bool   ff_enabled               = false;
+  double ff_k_Tin                 = 0.0;   // [kg/s per K]
+  double ff_k_flow                = 0.0;   // [kg/s per kg/s]   (dimensionless-like)
+  double ff_Tin_hot_nom           = std::numeric_limits<double>::quiet_NaN();   // auto-capture on reset() if NaN
+  double ff_m_dot_hot_nom         = std::numeric_limits<double>::quiet_NaN();   // auto-capture on reset() if NaN
+  bool   ff_auto_energy_balance   = false; // if true, k_ff_* are derived at reset()
+
+  // --- Cascade / actuator lag (B5) -----------------------------------------
+  //  Simulates the secondary "inner" loop of a cascade architecture: a valve
+  //  with first-order dynamics tracks the master-loop commanded cold flow.
+  //     dm/dt = (m_cmd - m) / τ_valve
+  //  When cascade is disabled or τ = 0, the exchanger sees the commanded flow
+  //  instantly (legacy behaviour).
+  bool   cascade_enabled = false;
+  double tau_valve       = 0.0;            // [s] actuator time constant
 };
 
 struct SimConfig {
@@ -66,6 +93,22 @@ struct SimConfig {
   Fluid coldCustom{};  // fallback when coldPreset == Custom
 
   FlowArrangement arrangement = FlowArrangement::CounterFlow;
+
+  // Shell-side correlation: Kern (compact, fast) or Bell–Delaware (segmented,
+  // industry-standard; applies Jc / Jl / Jb / Js / Jr corrections to an
+  // ideal-crossflow base).  Set via the "Shell-side method" combo-box.
+  ShellSideMethod shellMethod = ShellSideMethod::Kern;
+
+  // Finite-volume axial discretization.
+  //   numAxialCells <= 1  →  lumped model (legacy behavior)
+  //   numAxialCells  > 1  →  N-cell plug-flow finite volume with proper upwind advection
+  //                          and per-cell heat transfer (plots a real T(x) profile).
+  int numAxialCells = 20;
+
+  // Scripted timeline: events whose `fired` flag is false and whose trigger
+  // time has passed are applied (in declaration order) at the top of every
+  // Simulator::step() call.  Leave empty for no scripting.
+  Scenario scenario;
 };
 
 /** \brief Simulator advances the model in time with simple first-order lags to emulate dynamics. */
@@ -101,6 +144,32 @@ private:
   bool steadyStateMode_{false};  // true = no disturbances, false = dynamic with disturbances
   bool foulingEnabled_{true};
   std::unique_ptr<ControllerPID> pid_;  // allocated on reset() when pid.enabled
+
+  // Cascade/actuator inner state (valve position): actual cold flow reaching
+  // the exchanger after the first-order valve lag.  NaN  ⇒  actuator inactive.
+  double actuator_m_dot_cold_{std::numeric_limits<double>::quiet_NaN()};
+
+  // Cached FF gains resolved at reset() (honours ff_auto_energy_balance).
+  double ff_k_Tin_eff_{0.0};
+  double ff_k_flow_eff_{0.0};
+  double ff_Tin_hot_nom_eff_{0.0};
+  double ff_m_dot_hot_nom_eff_{0.0};
+
+  void resolveFeedForwardGains();
+  double computeFeedForward(double Tin_hot_meas, double m_dot_hot_meas) const;
+
+  // Axial (finite-volume) cell state — populated when cfg_.numAxialCells > 1.
+  // Th_cell_[0]   is adjacent to the hot-inlet header (x = 0).
+  // Th_cell_[N-1] is adjacent to the hot-outlet header (x = L).
+  // Cold indexing follows the same spatial convention; the cold-flow direction
+  // (counter vs. parallel) only changes which end feeds the inlet boundary.
+  std::vector<double> Th_cell_;
+  std::vector<double> Tc_cell_;
+
+  void initAxialProfile();
+  void stepAxial(double t, double dt);
+  void stepLumped(double t, double dt);
+  void applyScenarioEvents(double t);
 };
 
 } // namespace hx

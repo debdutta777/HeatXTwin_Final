@@ -15,10 +15,15 @@ public:
   /** Shell-side pressure drop (approximate cross-flow model). */
   [[nodiscard]] double dP_shell(double m_dot_cold, double Rf_shell, double k_deposit, double K_turns) const;
 
+  /** Choose shell-side pressure-drop correlation: Kern or Bell–Delaware. */
+  void setShellMethod(ShellSideMethod m) { shellMethod_ = m; }
+  [[nodiscard]] ShellSideMethod shellMethod() const { return shellMethod_; }
+
 private:
   Geometry g_;
   Fluid hot_;
   Fluid cold_;
+  ShellSideMethod shellMethod_ = ShellSideMethod::Kern;
 };
 
 } // namespace hx

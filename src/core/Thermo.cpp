@@ -1,4 +1,5 @@
 #include "Thermo.hpp"
+#include "BellDelaware.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -38,6 +39,12 @@ double Thermo::h_tube(double m_dot_hot) const {
 }
 
 double Thermo::h_shell(double m_dot_cold) const {
+  if (shellMethod_ == ShellSideMethod::BellDelaware) {
+    // Bell–Delaware: ideal crossflow modified by Jc (baffle-cut),
+    // Jl (leakage), Jb (bypass), Js (spacing), Jr (laminar).
+    return computeBellDelaware(g_, cold_, m_dot_cold, 0.0, 0.5).h_shell;
+  }
+  // --- Legacy Kern-style (Zhukauskas) correlation --------------------------
   // Zhukauskas tube-bank correlation for shell-side cross-flow
   // Shell side now carries COLD fluid per report
   // Note: For dynamic simulation with fouling, effective diameter should be passed
@@ -66,7 +73,7 @@ double Thermo::h_shell(double m_dot_cold) const {
   // then use: Pr_ratio = std::pow(Pr / Pr_w, 0.25)
   //
   // Current approximation: Pr/Pr_w ≈ 1.0 (valid for ΔT < 30-40°C)
-  const double Pr_ratio = std::pow(1.0, 0.25); // (Pr/Pr_w)^0.25, approximated as 1.0
+  const double Pr_ratio = 1.0; // (Pr/Pr_w)^0.25, approximated as 1.0
   
   const double Nu = C * std::pow(std::max(Re, 1.0), m) * std::pow(Pr, n) * Pr_ratio;
   // Use effective diameter for heat transfer coefficient calculation if provided
@@ -88,6 +95,10 @@ double Thermo::De_effective(double Rf_shell, double k_deposit) const {
 }
 
 double Thermo::h_shell_with_fouling(double m_dot_cold, double Rf_shell, double k_deposit) const {
+  if (shellMethod_ == ShellSideMethod::BellDelaware) {
+    return computeBellDelaware(g_, cold_, m_dot_cold, Rf_shell, k_deposit).h_shell;
+  }
+  // --- Legacy Kern-style (Zhukauskas) correlation with fouling -------------
   // Zhukauskas tube-bank correlation with effective diameter for fouling
   const double De_eff = De_effective(Rf_shell, k_deposit);
   // Correct Shell-Side Area Calculation (Kern Method)

@@ -67,10 +67,15 @@ public:
   void setHot(const Fluid &f)  { hot_  = f; }
   void setCold(const Fluid &f) { cold_ = f; }
 
+  /** Choose shell-side correlation: Kern (compact) or Bell–Delaware (segmented). */
+  void setShellMethod(ShellSideMethod m) { shellMethod_ = m; }
+  [[nodiscard]] ShellSideMethod shellMethod() const { return shellMethod_; }
+
 private:
   Geometry g_;
   Fluid hot_;
   Fluid cold_;
+  ShellSideMethod shellMethod_ = ShellSideMethod::Kern;
 };
 
 } // namespace hx

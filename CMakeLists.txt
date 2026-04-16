@@ -79,7 +79,7 @@ find_package_with_diagnostics(Eigen3 REQUIRED)
 find_package_with_diagnostics(fmt REQUIRED)
 find_package_with_diagnostics(spdlog REQUIRED)
 find_package_with_diagnostics(tomlplusplus REQUIRED)
-find_package_with_diagnostics(Qt6 REQUIRED COMPONENTS Core Widgets Charts)
+find_package_with_diagnostics(Qt6 REQUIRED COMPONENTS Core Widgets Charts PrintSupport Sql)
 
 # Validate critical dependencies
 if(NOT Eigen3_FOUND)
@@ -102,19 +102,31 @@ set(SOURCES
     src/main.cpp
     src/app/ui/ChartWidget.cpp
     src/app/ui/Diagnostics.cpp
+    src/app/ui/FoulingMapDialog.cpp
     src/app/ui/HeatExchangerWidget.cpp
     src/app/ui/KPIPanel.cpp
     src/app/ui/MainWindow.cpp
+    src/app/ui/MonteCarloDialog.cpp
+    src/app/ui/RunLogDialog.cpp
     src/app/ui/SimWorker.cpp
+    src/app/ui/SpectrumWidget.cpp
+    src/app/ui/VibrationDialog.cpp
+    src/core/AutoTune.cpp
+    src/core/BellDelaware.cpp
+    src/core/MonteCarlo.cpp
     src/core/ControllerPID.cpp
     src/core/EstimatorRLS.cpp
     src/core/FluidLibrary.cpp
     src/core/Fouling.cpp
+    src/core/FoulingMap.cpp
     src/core/Hydraulics.cpp
     src/core/Model.cpp
+    src/core/RunLog.cpp
+    src/core/Scenario.cpp
     src/core/Simulator.cpp
     src/core/Thermo.cpp
     src/core/Validation.cpp
+    src/core/VibrationCheck.cpp
     src/io/Config.cpp
     src/io/CsvLogger.cpp
 )
@@ -163,6 +175,8 @@ target_link_libraries(HeatXTwin_Pro PRIVATE
     Qt6::Core
     Qt6::Widgets
     Qt6::Charts
+    Qt6::PrintSupport
+    Qt6::Sql
 )
 message(STATUS "[Libraries] ✓ All libraries linked")
 
@@ -287,7 +301,7 @@ message(STATUS "  ✓ Eigen3 (matrix operations)")
 message(STATUS "  ✓ fmt (string formatting)")
 message(STATUS "  ✓ spdlog (logging)")
 message(STATUS "  ✓ toml++ (configuration)")
-message(STATUS "  ✓ Qt6 (GUI)")
+message(STATUS "  ✓ Qt6 (GUI + PrintSupport for PDF export)")
 message(STATUS "")
 message(STATUS "Next steps:")
 message(STATUS "  1. Run: cmake --build build --config Release")

@@ -97,4 +97,9 @@ private:
   double minY2_{0.0};  // Right Y-axis min for PID
   double maxY2_{10.0}; // Right Y-axis max for PID
   int sampleCount_{0};
+
+  // Running min/max of the right-axis (flow) series so auto-scaling
+  // avoids an O(n) rescan of the whole QLineSeries on every updateAxes().
+  double flowSeenMin_{ std::numeric_limits<double>::infinity()};
+  double flowSeenMax_{-std::numeric_limits<double>::infinity()};
 };

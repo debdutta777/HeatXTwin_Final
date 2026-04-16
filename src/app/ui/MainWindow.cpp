@@ -3,8 +3,19 @@
 #include "HeatExchangerWidget.hpp"
 #include "KPIPanel.hpp"
 #include "SimWorker.hpp"
+#include "SpectrumWidget.hpp"
+#include "MonteCarloDialog.hpp"
+#include "VibrationDialog.hpp"
+#include "FoulingMapDialog.hpp"
+#include "RunLogDialog.hpp"
 #include "Diagnostics.hpp"
 #include "core/Simulator.hpp"
+#include "core/AutoTune.hpp"
+#include "core/Scenario.hpp"
+#include "core/MonteCarlo.hpp"
+#include "core/VibrationCheck.hpp"
+#include "core/FoulingMap.hpp"
+#include "core/RunLog.hpp"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -29,8 +40,17 @@
 #include <QLocale>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QInputDialog>
+#include <QProgressDialog>
+#include <QPrinter>
+#include <QPageLayout>
+#include <QPageSize>
+#include <QMarginsF>
+#include <QTextDocument>
+#include <QFileInfo>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 namespace {
 struct ModeConfig {
@@ -197,8 +217,8 @@ void MainWindow::setupUi() {
 
 QWidget* MainWindow::createTopBar() {
   auto *topBar = new QWidget(this);
-  topBar->setMinimumHeight(110);
-  topBar->setMaximumHeight(115);
+  topBar->setMinimumHeight(165);
+  topBar->setMaximumHeight(175);
   topBar->setStyleSheet(R"(
     QWidget {
       background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -208,18 +228,23 @@ QWidget* MainWindow::createTopBar() {
   )");
 
   auto *mainLayout = new QVBoxLayout(topBar);
-  mainLayout->setSpacing(5);
-  mainLayout->setContentsMargins(10, 5, 10, 5);
+  mainLayout->setSpacing(4);
+  mainLayout->setContentsMargins(10, 4, 10, 4);
 
-  // First row - Control buttons and chart controls
+  // Row 1a — primary simulation controls + chart zoom controls
   auto *row1Layout = new QHBoxLayout();
-  row1Layout->setSpacing(10);
+  row1Layout->setSpacing(8);
 
-  // Second row - Parameters
+  // Row 1b — data/export + advanced analysis tools
+  auto *row1bLayout = new QHBoxLayout();
+  row1bLayout->setSpacing(8);
+
+  // Row 2  — parameters (duration, dt, speed, scenario, status)
   auto *row2Layout = new QHBoxLayout();
   row2Layout->setSpacing(10);
 
   mainLayout->addLayout(row1Layout);
+  mainLayout->addLayout(row1bLayout);
   mainLayout->addLayout(row2Layout);
 
   // === SIMULATION CONTROL BUTTONS === (Row 1)
@@ -291,15 +316,17 @@ QWidget* MainWindow::createTopBar() {
   line2->setFrameShadow(QFrame::Sunken);
   row1Layout->addWidget(line2);
 
-  // === EXPORT BUTTON === (Row 1)
+  row1Layout->addStretch();
+
+  // === EXPORT BUTTON === (Row 1b)
   btnExport_ = new QPushButton("Export CSV", this);
   btnExport_->setMinimumSize(100, 38);
   btnExport_->setEnabled(false);
   btnExport_->setToolTip("Export simulation data to CSV");
   connect(btnExport_, &QPushButton::clicked, this, &MainWindow::onExportData);
-  row1Layout->addWidget(btnExport_);
+  row1bLayout->addWidget(btnExport_);
 
-  // === SNAPSHOT / BASELINE === (Row 1)
+  // === SNAPSHOT / BASELINE === (Row 1b)
   btnSnapshot_ = new QPushButton("Snapshot", this);
   btnSnapshot_->setMinimumSize(100, 38);
   btnSnapshot_->setEnabled(false);
@@ -307,23 +334,84 @@ QWidget* MainWindow::createTopBar() {
       "Capture the current traces as a baseline overlay.\n"
       "Subsequent runs render on top of the dashed baseline for comparison.");
   connect(btnSnapshot_, &QPushButton::clicked, this, &MainWindow::onSnapshotBaseline);
-  row1Layout->addWidget(btnSnapshot_);
+  row1bLayout->addWidget(btnSnapshot_);
 
   btnClearBaseline_ = new QPushButton("Clear Baseline", this);
   btnClearBaseline_->setMinimumSize(110, 38);
   btnClearBaseline_->setEnabled(false);
   btnClearBaseline_->setToolTip("Remove the baseline overlay from all charts.");
   connect(btnClearBaseline_, &QPushButton::clicked, this, &MainWindow::onClearBaseline);
-  row1Layout->addWidget(btnClearBaseline_);
+  row1bLayout->addWidget(btnClearBaseline_);
 
-  btnReport_ = new QPushButton("Report (HTML)", this);
-  btnReport_->setMinimumSize(110, 38);
+  btnReport_ = new QPushButton("Report (HTML/PDF)", this);
+  btnReport_->setMinimumSize(140, 38);
   btnReport_->setEnabled(false);
-  btnReport_->setToolTip("Generate an HTML report summarising parameters, KPIs and final state.");
+  btnReport_->setToolTip("Generate an HTML or PDF report summarising parameters, KPIs and final state.");
   connect(btnReport_, &QPushButton::clicked, this, &MainWindow::onGenerateReport);
-  row1Layout->addWidget(btnReport_);
+  row1bLayout->addWidget(btnReport_);
 
-  row1Layout->addStretch();
+  // Separator between data/export buttons and advanced analysis buttons
+  auto *line3 = new QFrame(this);
+  line3->setFrameShape(QFrame::VLine);
+  line3->setFrameShadow(QFrame::Sunken);
+  row1bLayout->addWidget(line3);
+
+  btnMonteCarlo_ = new QPushButton("Monte-Carlo...", this);
+  btnMonteCarlo_->setMinimumSize(130, 38);
+  btnMonteCarlo_->setToolTip(
+      "Run a Monte-Carlo sensitivity study: N trials with Gaussian noise\n"
+      "applied to flows, inlet temperatures, fluid properties and fouling.\n"
+      "Produces histograms, summary statistics, and a tornado chart showing\n"
+      "the relative influence of each input on the heat-transfer performance.");
+  btnMonteCarlo_->setStyleSheet(
+      "QPushButton{background:#8e44ad;color:white;font-weight:600;}"
+      "QPushButton:hover{background:#9b59b6;}"
+      "QPushButton:disabled{background:#bfc9d1;}");
+  connect(btnMonteCarlo_, &QPushButton::clicked, this, &MainWindow::onMonteCarlo);
+  row1bLayout->addWidget(btnMonteCarlo_);
+
+  btnVibration_ = new QPushButton("Vibration Check...", this);
+  btnVibration_->setMinimumSize(145, 38);
+  btnVibration_->setToolTip(
+      "Run a TEMA flow-induced vibration diagnostic on the current tube bundle.\n"
+      "Checks vortex-shedding lock-in, fluid-elastic instability (Connors 1970),\n"
+      "and shell acoustic resonance.  Reports SAFE / MARGINAL / FAIL for each\n"
+      "mechanism along with fn, fv, V_crit and supporting formulas.");
+  btnVibration_->setStyleSheet(
+      "QPushButton{background:#d35400;color:white;font-weight:600;}"
+      "QPushButton:hover{background:#e67e22;}"
+      "QPushButton:disabled{background:#bfc9d1;}");
+  connect(btnVibration_, &QPushButton::clicked, this, &MainWindow::onVibrationCheck);
+  row1bLayout->addWidget(btnVibration_);
+
+  btnHeatmap_ = new QPushButton("Fouling Heatmap...", this);
+  btnHeatmap_->setMinimumSize(150, 38);
+  btnHeatmap_->setToolTip(
+      "Show a per-tube fouling-resistance heatmap of the bundle.\n"
+      "Combines radial bypass bias, baffle-cut stagnation and axial build-up\n"
+      "around the current bulk Rf, so you can see which tubes are the worst\n"
+      "offenders and along which span the deposit thickens.");
+  btnHeatmap_->setStyleSheet(
+      "QPushButton{background:#16a085;color:white;font-weight:600;}"
+      "QPushButton:hover{background:#1abc9c;}"
+      "QPushButton:disabled{background:#bfc9d1;}");
+  connect(btnHeatmap_, &QPushButton::clicked, this, &MainWindow::onFoulingHeatmap);
+  row1bLayout->addWidget(btnHeatmap_);
+
+  btnRunLog_ = new QPushButton("Run Log...", this);
+  btnRunLog_->setMinimumSize(115, 38);
+  btnRunLog_->setToolTip(
+      "Browse past runs stored in the SQLite history database.\n"
+      "Select two rows to overlay their Tc_out(t) and Q(t) traces and\n"
+      "see a quantitative delta between the two runs.");
+  btnRunLog_->setStyleSheet(
+      "QPushButton{background:#5d3fd3;color:white;font-weight:600;}"
+      "QPushButton:hover{background:#7a5df0;}"
+      "QPushButton:disabled{background:#bfc9d1;}");
+  connect(btnRunLog_, &QPushButton::clicked, this, &MainWindow::onRunLog);
+  row1bLayout->addWidget(btnRunLog_);
+
+  row1bLayout->addStretch();
 
   // === SIMULATION PARAMETERS === (Row 2)
   row2Layout->addWidget(new QLabel("Duration:", this));
@@ -369,6 +457,18 @@ QWidget* MainWindow::createTopBar() {
   connect(cmbSimulationMode_, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &MainWindow::onSimulationModeChanged);
   row2Layout->addWidget(cmbSimulationMode_);
+
+  row2Layout->addWidget(new QLabel("Scenario:", this));
+  cmbScenario_ = new QComboBox(this);
+  for (int i = 0; i < hx::kNumScenarioPresets; ++i) {
+    cmbScenario_->addItem(hx::scenarioName(i));
+  }
+  cmbScenario_->setMinimumWidth(220);
+  cmbScenario_->setToolTip(
+      "Scripted timeline of events (setpoint changes, inlet disturbances, "
+      "fouling bursts). Scenario is armed when Start is pressed.");
+  cmbScenario_->setCurrentIndex(0);
+  row2Layout->addWidget(cmbScenario_);
 
   row2Layout->addWidget(new QLabel("Status:", this));
   lblStatus_ = new QLabel("Ready", this);
@@ -671,6 +771,21 @@ QWidget* MainWindow::createTopBar() {
           this, &MainWindow::onParameterChanged);
   formGeom->addRow("Flow Arrangement:", cmbFlowArrangement_);
 
+  cmbShellMethod_ = new QComboBox(this);
+  cmbShellMethod_->addItem("Kern (1950) — compact",           static_cast<int>(hx::ShellSideMethod::Kern));
+  cmbShellMethod_->addItem("Bell–Delaware (1963) — segmented", static_cast<int>(hx::ShellSideMethod::BellDelaware));
+  cmbShellMethod_->setCurrentIndex(0);
+  cmbShellMethod_->setToolTip(
+      "Shell-side h & ΔP correlation.\n"
+      "Kern: single Zhukauskas-style j-factor applied to a Kern crossflow "
+      "area. Fast, but ignores bundle-shell bypass and tube-baffle leakage.\n"
+      "Bell–Delaware: ideal-crossflow h multiplied by Jc (baffle-cut), "
+      "Jl (leakage), Jb (bundle bypass), Js (spacing), Jr (laminar). "
+      "Pressure drop uses matching Rb, Rl, Rs factors. Industry standard.");
+  connect(cmbShellMethod_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, &MainWindow::onParameterChanged);
+  formGeom->addRow("Shell-side Method:", cmbShellMethod_);
+
   layout->addWidget(grpGeometry);
 
   // === FOULING ===
@@ -801,6 +916,82 @@ QWidget* MainWindow::createTopBar() {
           this, &MainWindow::onParameterChanged);
   formPid->addRow("u max:", spnPidUMax_);
 
+  auto *btnAutoTune = new QPushButton(
+      QStringLiteral("Auto-Tune (Relay / ZN)"), grpPid_);
+  btnAutoTune->setToolTip(
+      QStringLiteral("Run an \xC3\x85str\xC3\xB6m-H\xC3\xA4gglund relay experiment on the plant, "
+                     "identify ultimate gain K\xE1\xB5\xA4 and period P\xE1\xB5\xA4, then apply the "
+                     "Ziegler-Nichols classic PID rule and push the gains into the spinboxes above."));
+  btnAutoTune->setMinimumHeight(32);
+  btnAutoTune->setStyleSheet(
+      QStringLiteral("QPushButton{background:#2c5784;color:white;font-weight:bold;border-radius:4px;}"
+                     "QPushButton:hover{background:#3b6aa0;}"
+                     "QPushButton:disabled{background:#7f8c8d;}"));
+  connect(btnAutoTune, &QPushButton::clicked, this, &MainWindow::onAutoTunePid);
+  formPid->addRow(QString(), btnAutoTune);
+
+  // --- Feed-forward and cascade (B5) --------------------------------------
+  auto *lblFF = new QLabel(QStringLiteral(
+      "<b style='color:#2c3e50;'>Feed-forward &amp; Cascade</b>"
+      "<span style='color:#7f8c8d;'>&nbsp;(advanced control)</span>"), this);
+  formPid->addRow(lblFF);
+
+  chkFFEnabled_ = new QCheckBox(QStringLiteral("Enable feed-forward (measure T\xE2\x82\x95,\xE1\xB5\xA2\xE2\x82\x99 &amp; m\xCC\x87\xE2\x82\x95)"), this);
+  chkFFEnabled_->setToolTip(
+      QStringLiteral("Adds a static feed-forward term to the cold-flow command.\n"
+                     "u_FF = k_ff_Tin\xC2\xB7(Tin_hot - nominal) + k_ff_flow\xC2\xB7(m_dot_hot - nominal)\n"
+                     "Pre-emptively compensates measured hot-side disturbances\n"
+                     "before they cause the cold outlet temperature to drift."));
+  connect(chkFFEnabled_, &QCheckBox::toggled, this, &MainWindow::onParameterChanged);
+  formPid->addRow(chkFFEnabled_);
+
+  chkFFAutoEB_ = new QCheckBox(QStringLiteral("Auto gains from energy balance"), this);
+  chkFFAutoEB_->setToolTip(
+      QStringLiteral("Derive k_ff_Tin and k_ff_flow analytically from the\n"
+                     "nominal steady-state energy balance:\n"
+                     "   m_c \xC2\xB7 cp_c \xC2\xB7 (SP \xE2\x88\x92 Tin_c) = m_h \xC2\xB7 cp_h \xC2\xB7 (Tin_h \xE2\x88\x92 Th_out)\n"
+                     "\xE2\x88\x82m_c/\xE2\x88\x82Tin_h and \xE2\x88\x82m_c/\xE2\x88\x82m_h are then used as FF gains."));
+  connect(chkFFAutoEB_, &QCheckBox::toggled, this, &MainWindow::onParameterChanged);
+  formPid->addRow(chkFFAutoEB_);
+
+  spnFFkTin_ = new QDoubleSpinBox(this);
+  spnFFkTin_->setRange(-5.0, 5.0);
+  spnFFkTin_->setDecimals(4);
+  spnFFkTin_->setSingleStep(0.01);
+  spnFFkTin_->setValue(0.0);
+  spnFFkTin_->setSuffix(QStringLiteral(" kg/s/\xC2\xB0""C"));
+  connect(spnFFkTin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &MainWindow::onParameterChanged);
+  formPid->addRow(QStringLiteral("k_ff (Tin_hot):"), spnFFkTin_);
+
+  spnFFkFlow_ = new QDoubleSpinBox(this);
+  spnFFkFlow_->setRange(-5.0, 5.0);
+  spnFFkFlow_->setDecimals(4);
+  spnFFkFlow_->setSingleStep(0.01);
+  spnFFkFlow_->setValue(0.0);
+  spnFFkFlow_->setSuffix(QStringLiteral(" (kg/s)/(kg/s)"));
+  connect(spnFFkFlow_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &MainWindow::onParameterChanged);
+  formPid->addRow(QStringLiteral("k_ff (m_hot):"), spnFFkFlow_);
+
+  chkCascadeEnabled_ = new QCheckBox(QStringLiteral("Enable cascade (1st-order actuator lag)"), this);
+  chkCascadeEnabled_->setToolTip(
+      QStringLiteral("Simulates a secondary inner loop: the cold-flow valve/pump\n"
+                     "responds to the master PID command with first-order dynamics\n"
+                     "(time constant \xCF\x84_valve).  Turn off for ideal actuator."));
+  connect(chkCascadeEnabled_, &QCheckBox::toggled, this, &MainWindow::onParameterChanged);
+  formPid->addRow(chkCascadeEnabled_);
+
+  spnTauValve_ = new QDoubleSpinBox(this);
+  spnTauValve_->setRange(0.0, 300.0);
+  spnTauValve_->setDecimals(2);
+  spnTauValve_->setSingleStep(1.0);
+  spnTauValve_->setValue(5.0);
+  spnTauValve_->setSuffix(QStringLiteral(" s"));
+  connect(spnTauValve_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &MainWindow::onParameterChanged);
+  formPid->addRow(QStringLiteral("\xCF\x84_valve:"), spnTauValve_);
+
   layout->addWidget(grpPid_);
 
   // === LIMITS ===
@@ -879,6 +1070,7 @@ void MainWindow::createChartTabs() {
   exchWidget_->setGeometryData(geom_);
   exchWidget_->setOperatingPoint(op_);
   kpiPanel_ = new KPIPanel(this);
+  spectrumWidget_ = new SpectrumWidget(this);
 
   // Connect flow control signals from the visualization widget back to spinboxes
   connect(exchWidget_, &HeatExchangerWidget::hotFlowRateChanged, this, [this](double val) {
@@ -898,6 +1090,7 @@ void MainWindow::createChartTabs() {
   chartTabs_->addTab(chartPressure_, "Pressure Drops");
   chartTabs_->addTab(chartFouling_, "Fouling");
   chartTabs_->addTab(chartPID_, "PID Control");
+  chartTabs_->addTab(spectrumWidget_, "Spectrum");
   chartTabs_->addTab(exchWidget_, "Heat Exchanger View");
   chartTabs_->addTab(kpiPanel_, "KPI Dashboard");
 }
@@ -1184,6 +1377,10 @@ void MainWindow::updateSimulationCore() {
       ? static_cast<hx::FlowArrangement>(cmbFlowArrangement_->currentData().toInt())
       : hx::FlowArrangement::CounterFlow;
 
+  simConfig_.shellMethod = cmbShellMethod_
+      ? static_cast<hx::ShellSideMethod>(cmbShellMethod_->currentData().toInt())
+      : hx::ShellSideMethod::Kern;
+
   // FLUID PRESETS (feeds T-dependent property library)
   simConfig_.hotPreset  = cmbHotPreset_
       ? static_cast<hx::FluidPreset>(cmbHotPreset_->currentData().toInt())
@@ -1194,6 +1391,13 @@ void MainWindow::updateSimulationCore() {
   simConfig_.hotCustom  = hot_;
   simConfig_.coldCustom = cold_;
 
+  // SCENARIO (scripted timeline).  Rebuild from the preset selection so a
+  // fresh run always gets a fresh set of un-fired events.
+  {
+    const int idx = cmbScenario_ ? cmbScenario_->currentIndex() : 0;
+    simConfig_.scenario = hx::scenarioByIndex(idx);
+  }
+
   // PID CONTROLLER
   simConfig_.pid.enabled        = grpPid_ ? grpPid_->isChecked() : false;
   simConfig_.pid.setpoint_Tc_out = spnPidSetpoint_ ? spnPidSetpoint_->value() : 45.0;
@@ -1203,10 +1407,25 @@ void MainWindow::updateSimulationCore() {
   simConfig_.pid.u_min          = spnPidUMin_ ? spnPidUMin_->value() : 0.1;
   simConfig_.pid.u_max          = spnPidUMax_ ? spnPidUMax_->value() : 5.0;
 
+  // Feed-forward + cascade (B5).  Nominal disturbance values are captured
+  // automatically from the current operating point (leave NaN → auto-grab).
+  simConfig_.pid.ff_enabled             = chkFFEnabled_      && chkFFEnabled_->isChecked();
+  simConfig_.pid.ff_auto_energy_balance = chkFFAutoEB_       && chkFFAutoEB_->isChecked();
+  simConfig_.pid.ff_k_Tin               = spnFFkTin_         ? spnFFkTin_->value()   : 0.0;
+  simConfig_.pid.ff_k_flow              = spnFFkFlow_        ? spnFFkFlow_->value()  : 0.0;
+  simConfig_.pid.ff_Tin_hot_nom         = std::numeric_limits<double>::quiet_NaN();
+  simConfig_.pid.ff_m_dot_hot_nom       = std::numeric_limits<double>::quiet_NaN();
+  simConfig_.pid.cascade_enabled        = chkCascadeEnabled_ && chkCascadeEnabled_->isChecked();
+  simConfig_.pid.tau_valve              = spnTauValve_       ? spnTauValve_->value() : 0.0;
+
   // Recreate simulation objects with updated parameters
   thermo_ = std::make_unique<hx::Thermo>(geom_, hot_, cold_);
   hydro_ = std::make_unique<hx::Hydraulics>(geom_, hot_, cold_);
   fouling_ = std::make_unique<hx::Fouling>(foulParams_);
+
+  // Apply chosen shell-side correlation (Kern or Bell–Delaware).
+  thermo_->setShellMethod(simConfig_.shellMethod);
+  hydro_ ->setShellMethod(simConfig_.shellMethod);
 
   if (exchWidget_) {
     exchWidget_->setGeometryData(geom_);
@@ -1230,15 +1449,43 @@ void MainWindow::onParameterChanged() {
 void MainWindow::onStart() {
   updateSimulationCore();
 
+  // If a scenario is armed, make sure the simulation duration covers the
+  // last event so the operator sees the whole story.  The user can still
+  // override by editing the Duration spinbox before pressing Start again.
+  if (!simConfig_.scenario.empty()) {
+    double lastT = 0.0;
+    for (const auto &ev : simConfig_.scenario) lastT = std::max(lastT, ev.t);
+    const double need = lastT + 60.0;   // 60 s tail so the tail is visible
+    if (simConfig_.tEnd < need) {
+      simConfig_.tEnd = need;
+      QSignalBlocker b(spnDuration_);
+      spnDuration_->setValue(need);
+    }
+    const int idx = cmbScenario_ ? cmbScenario_->currentIndex() : 0;
+    statusBar()->showMessage(
+        QStringLiteral("Scenario armed: %1 — %2 events over %3 s")
+          .arg(hx::scenarioName(idx))
+          .arg(simConfig_.scenario.size())
+          .arg(lastT, 0, 'f', 0),
+        5000);
+  }
+
   // Clear all charts and data
   chartTemp_->clear();
   chartHeat_->clear();
   chartPressure_->clear();
   chartFouling_->clear();
   if (chartPID_) chartPID_->clear();
+  if (spectrumWidget_) spectrumWidget_->clear();
   if (kpiPanel_) kpiPanel_->reset();
   U_clean_baseline_ = 0.0;
   simulationData_.clear();
+  // Pre-reserve to avoid 10+ reallocations over a typical run.  Adds a
+  // small slack so the +60 s scenario tail doesn't force a reallocation.
+  if (simConfig_.dt > 0.0) {
+    const size_t est = static_cast<size_t>(simConfig_.tEnd / simConfig_.dt) + 128;
+    simulationData_.reserve(est);
+  }
 
   // Create simulator
   auto simulator = std::make_unique<hx::Simulator>(*thermo_, *hydro_, *fouling_, simConfig_);
@@ -1315,6 +1562,9 @@ void MainWindow::onSimulationSample(double t, const hx::State& state) {
   if (chartPID_) {
     chartPID_->addSample(t, state, state.pidSetpoint, state.pidColdFlow);
   }
+  if (spectrumWidget_) {
+    spectrumWidget_->addSample(t, state.Tc_out);
+  }
   if (exchWidget_) {
     exchWidget_->updateSimulationState(state);
   }
@@ -1325,6 +1575,20 @@ void MainWindow::onSimulationSample(double t, const hx::State& state) {
     }
     const double baseline = (U_clean_baseline_ > 0.0) ? U_clean_baseline_ : state.U;
     kpiPanel_->update(state, op_, hot_, cold_, geom_, simConfig_.limits, baseline);
+  }
+
+  // Live per-tube fouling heatmap: every ~30 samples (≈0.6 s of UI time at
+  // the worker's 50 Hz cap) recompute the spatial map from the current bulk
+  // Rf and push it to the open dialog.  Computing the map is O(nTubes·nAxial)
+  // — small enough not to dent the UI thread but big enough that we don't
+  // want to run it on every sample.
+  if (heatmapDlg_ && state.Rf > 0.0) {
+    if (++heatmapSampleCounter_ >= 30) {
+      heatmapSampleCounter_ = 0;
+      const hx::FoulingMap liveMap =
+          hx::computeFoulingMap(geom_, op_, state.Rf, 24);
+      heatmapDlg_->updateMap(liveMap, geom_);
+    }
   }
 }
 
@@ -1343,6 +1607,40 @@ void MainWindow::onSimulationFinished() {
   isPaused_ = false;
   statusBar()->showMessage(QString("Simulation completed successfully - %1 data points collected")
                           .arg(simulationData_.size()), 5000);
+
+  // === Auto-log to SQLite run history (D12) =========================
+  // Persist the run so the user can browse / compare it later via the
+  // "Run Log..." dialog.  Non-fatal — any DB error is swallowed and
+  // reported on the status bar so the main UI flow is unaffected.
+  if (haveData && hx::RunLog::instance().isOpen()) {
+    const auto &[tFinal, sFinal] = simulationData_.back();
+    std::vector<hx::RunSample> samples;
+    samples.reserve(simulationData_.size());
+    for (const auto &[t, s] : simulationData_) {
+      hx::RunSample rs;
+      rs.t        = t;
+      rs.Tc_out   = s.Tc_out;
+      rs.Th_out   = s.Th_out;
+      rs.Q        = s.Q;
+      rs.U        = s.U;
+      rs.Rf       = s.Rf;
+      rs.dP_tube  = s.dP_tube;
+      rs.dP_shell = s.dP_shell;
+      rs.pid_cmd  = s.pidColdFlow;        // NaN when PID disabled
+      samples.push_back(rs);
+    }
+    hx::RunRecord rec = hx::RunLog::makeRecord(
+        simConfig_, op_, geom_, hot_, cold_,
+        simulationModeLabel(simulationMode_),
+        tFinal, sFinal);
+    const qint64 rowId = hx::RunLog::instance().saveRun(rec, samples);
+    if (rowId > 0) {
+      statusBar()->showMessage(
+          QString("Run archived to history database (id = %1, %2 samples)")
+              .arg(rowId).arg(simulationData_.size()),
+          5000);
+    }
+  }
 }
 
 void MainWindow::onReset() {
@@ -1379,6 +1677,7 @@ void MainWindow::onReset() {
   chartPressure_->clear();
   chartFouling_->clear();
   if (chartPID_) chartPID_->clear();
+  if (spectrumWidget_) spectrumWidget_->clear();
   if (kpiPanel_) kpiPanel_->reset();
   U_clean_baseline_ = 0.0;
   simulationData_.clear();
@@ -1558,15 +1857,15 @@ void MainWindow::onGenerateReport() {
 
   const QString suggested = QStringLiteral("HeatXTwin_Report_%1.html")
       .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+  QString selectedFilter;
   const QString filename = QFileDialog::getSaveFileName(
-      this, "Save Simulation Report", suggested, "HTML Files (*.html)");
+      this, "Save Simulation Report", suggested,
+      "HTML Files (*.html);;PDF Files (*.pdf)", &selectedFilter);
   if (filename.isEmpty()) return;
 
-  QFile file(filename);
-  if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-    QMessageBox::critical(this, "Error", "Could not open file for writing.");
-    return;
-  }
+  const QString ext = QFileInfo(filename).suffix().toLower();
+  const bool isPdf = (ext == QStringLiteral("pdf"))
+                     || (ext.isEmpty() && selectedFilter.contains(QStringLiteral("pdf"), Qt::CaseInsensitive));
 
   const auto &[t_final, s_final] = simulationData_.back();
   const double dT_hot  = op_.Tin_hot  - s_final.Th_out;
@@ -1583,7 +1882,9 @@ void MainWindow::onGenerateReport() {
   const double U_clean = (U_clean_baseline_ > 0.0) ? U_clean_baseline_ : s_final.U;
   const double foulingPenalty = (U_clean > 0.0) ? 100.0 * (1.0 - s_final.U / U_clean) : 0.0;
 
-  QTextStream out(&file);
+  QString html;
+  html.reserve(16 * 1024);
+  QTextStream out(&html);
   out.setEncoding(QStringConverter::Utf8);
 
   out << "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"UTF-8\">\n";
@@ -1630,6 +1931,10 @@ void MainWindow::onGenerateReport() {
 
   out << "<h2>Flow arrangement &amp; fluid models</h2><table>\n";
   out << htmlRow("Flow arrangement",  arrangementLabel(simConfig_.arrangement));
+  out << htmlRow("Shell-side method",
+                  simConfig_.shellMethod == hx::ShellSideMethod::BellDelaware
+                      ? QStringLiteral("Bell–Delaware (1963) — segmented (J<sub>c</sub>, J<sub>l</sub>, J<sub>b</sub>, J<sub>s</sub>, J<sub>r</sub>)")
+                      : QStringLiteral("Kern (1950) — compact Zhukauskas"));
   out << htmlRow("Hot-side model",    fluidPresetLabel(simConfig_.hotPreset));
   out << htmlRow("Cold-side model",   fluidPresetLabel(simConfig_.coldPreset));
   out << htmlRow("PID control loop",  simConfig_.pid.enabled ? QStringLiteral("ENABLED - regulating m&#775;<sub>cold</sub> to track T<sub>c,out</sub>")
@@ -1707,15 +2012,315 @@ void MainWindow::onGenerateReport() {
   out << "<footer>Produced by HeatXTwin Pro 2.0 - educational digital twin of a shell-and-tube heat exchanger.<br>"
          "Formulas follow Incropera/DeWitt, Kern, and Bowman (1936); see source for references.</footer>\n";
   out << "</body></html>\n";
-  file.close();
+  out.flush();
 
-  statusBar()->showMessage(QString("Report written to %1").arg(filename), 5000);
+  // Normalise the output path: if the user typed just a name without an
+  // extension, append the one implied by the filter they chose.
+  QString outPath = filename;
+  if (QFileInfo(outPath).suffix().isEmpty()) {
+    outPath += isPdf ? QStringLiteral(".pdf") : QStringLiteral(".html");
+  }
+
+  if (isPdf) {
+    // Render the HTML through a QTextDocument into a QPrinter set to PDF
+    // format.  This gives us a proper A4 multi-page PDF with page breaks
+    // handled by Qt's rich-text engine.
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setOutputFormat(QPrinter::PdfFormat);
+    printer.setOutputFileName(outPath);
+    QPageLayout layout(QPageSize(QPageSize::A4),
+                       QPageLayout::Portrait,
+                       QMarginsF(15.0, 15.0, 15.0, 15.0),
+                       QPageLayout::Millimeter);
+    printer.setPageLayout(layout);
+
+    QTextDocument doc;
+    doc.setHtml(html);
+    // Match the page width so the text-engine paginates correctly.
+    doc.setPageSize(printer.pageRect(QPrinter::DevicePixel).size());
+    doc.print(&printer);
+  } else {
+    QFile file(outPath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+      QMessageBox::critical(this, "Error", "Could not open file for writing.");
+      return;
+    }
+    QTextStream fout(&file);
+    fout.setEncoding(QStringConverter::Utf8);
+    fout << html;
+    file.close();
+  }
+
+  const QString kindLabel = isPdf ? QStringLiteral("PDF") : QStringLiteral("HTML");
+  statusBar()->showMessage(QStringLiteral("%1 report written to %2").arg(kindLabel, outPath), 5000);
   const auto reply = QMessageBox::information(this, "Report Generated",
-      QStringLiteral("HTML report saved to:\n%1\n\nOpen it now in the default browser?").arg(filename),
+      QStringLiteral("%1 report saved to:\n%2\n\nOpen it now in the default viewer?").arg(kindLabel, outPath),
       QMessageBox::Yes | QMessageBox::No);
   if (reply == QMessageBox::Yes) {
-    QDesktopServices::openUrl(QUrl::fromLocalFile(filename));
+    QDesktopServices::openUrl(QUrl::fromLocalFile(outPath));
   }
+}
+
+void MainWindow::onAutoTunePid() {
+  if (isRunning_) {
+    QMessageBox::information(this, "Simulation Running",
+        "Stop the running simulation before invoking auto-tune - the experiment "
+        "needs exclusive use of the plant model.");
+    return;
+  }
+
+  // Make sure simConfig_, op_, geom_, hot_, cold_, foulParams_ reflect the
+  // current UI state.  updateSimulationCore() is the canonical path.
+  updateSimulationCore();
+
+  // Configure the relay experiment. Use the user's setpoint from the PID
+  // group; if the plant is already sitting near the setpoint the bias is
+  // just the current cold-flow value.
+  hx::AutotuneSettings tune;
+  tune.setpoint_Tc_out = spnPidSetpoint_->value();
+  tune.mv_bias         = op_.m_dot_cold;
+  // Relay amplitude = 30% of the operating flow, clamped to a sane band.
+  tune.relay_h         = std::clamp(0.3 * op_.m_dot_cold, 0.05, 1.5);
+  tune.hysteresis      = 0.1;
+  tune.requiredCycles  = 5;
+  tune.maxSimTime      = 2000.0;
+
+  statusBar()->showMessage(
+      QStringLiteral("Running relay auto-tune (h=%1 kg/s around bias=%2 kg/s)...")
+          .arg(tune.relay_h, 0, 'f', 3).arg(tune.mv_bias, 0, 'f', 3));
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  const hx::AutotuneResult r = hx::runRelayAutotune(
+      op_, geom_, hot_, cold_, foulParams_, simConfig_, tune);
+  QApplication::restoreOverrideCursor();
+
+  if (!r.ok) {
+    statusBar()->showMessage(
+        QStringLiteral("Auto-tune failed: %1").arg(QString::fromStdString(r.message)), 7000);
+    QMessageBox::warning(this, "Auto-Tune Failed",
+        QString::fromStdString(r.message));
+    return;
+  }
+
+  // Apply the recommended gains.  Block signals so the parameter-change
+  // handler doesn't fire three times in a row and restart the debounce timer.
+  {
+    QSignalBlocker b1(spnPidKp_);
+    QSignalBlocker b2(spnPidKi_);
+    QSignalBlocker b3(spnPidKd_);
+    spnPidKp_->setValue(r.Kp);
+    spnPidKi_->setValue(r.Ki);
+    spnPidKd_->setValue(r.Kd);
+  }
+  // Ensure the PID group is enabled so the new gains actually take effect
+  // when the next simulation is started.
+  if (grpPid_ && !grpPid_->isChecked()) {
+    QSignalBlocker bg(grpPid_);
+    grpPid_->setChecked(true);
+  }
+  updateSimulationCore();
+
+  const QString formula = QStringLiteral(
+      "<b>Relay experiment identified:</b>"
+      "<table style='margin-left:12px'>"
+      "<tr><td>Ultimate gain</td><td>K<sub>u</sub></td><td>= %1</td></tr>"
+      "<tr><td>Ultimate period</td><td>P<sub>u</sub></td><td>= %2 s</td></tr>"
+      "<tr><td>PV amplitude</td><td>a</td><td>= %3 K (peak-to-peak)</td></tr>"
+      "<tr><td>Cycles observed</td><td>&nbsp;</td><td>= %4</td></tr>"
+      "</table>"
+      "<br><b>Ziegler-Nichols classic PID rule:</b>"
+      "<table style='margin-left:12px'>"
+      "<tr><td>K<sub>p</sub> = 0.6&middot;K<sub>u</sub></td><td>= %5</td></tr>"
+      "<tr><td>K<sub>i</sub> = K<sub>p</sub>/(0.5&middot;P<sub>u</sub>)</td><td>= %6</td></tr>"
+      "<tr><td>K<sub>d</sub> = K<sub>p</sub>&middot;(0.125&middot;P<sub>u</sub>)</td><td>= %7</td></tr>"
+      "</table>"
+      "<br><i>Gains have been pushed into the PID spinboxes.</i>")
+      .arg(r.Ku, 0, 'g', 4)
+      .arg(r.Pu, 0, 'f', 2)
+      .arg(r.amplitude, 0, 'f', 3)
+      .arg(r.cyclesObserved)
+      .arg(r.Kp, 0, 'g', 4)
+      .arg(r.Ki, 0, 'g', 4)
+      .arg(r.Kd, 0, 'g', 4);
+
+  QMessageBox box(this);
+  box.setWindowTitle("Auto-Tune Complete");
+  box.setIcon(QMessageBox::Information);
+  box.setTextFormat(Qt::RichText);
+  box.setText(formula);
+  box.exec();
+
+  statusBar()->showMessage(
+      QStringLiteral("Auto-tune done: Kp=%1  Ki=%2  Kd=%3  (Ku=%4, Pu=%5s)")
+          .arg(r.Kp, 0, 'g', 4).arg(r.Ki, 0, 'g', 4).arg(r.Kd, 0, 'g', 4)
+          .arg(r.Ku, 0, 'g', 4).arg(r.Pu, 0, 'f', 1),
+      8000);
+}
+
+void MainWindow::onMonteCarlo() {
+  if (isRunning_) {
+    QMessageBox::information(this, "Simulation Running",
+        "Stop the running simulation before launching a Monte-Carlo study - "
+        "the ensemble needs exclusive use of the plant model.");
+    return;
+  }
+
+  // Sync simConfig_ / op_ / geom_ / fluid structs with the UI.
+  updateSimulationCore();
+
+  // Ask for trial count; σ values use defaults (chosen for a believable
+  // "process uncertainty" profile).  Power users can tune σ's directly
+  // in the MonteCarloSettings struct later if desired.
+  bool ok = false;
+  const int nTrials = QInputDialog::getInt(
+      this,
+      QStringLiteral("Monte-Carlo Sensitivity"),
+      QStringLiteral(
+          "Number of Monte-Carlo trials:\n"
+          "\n"
+          "Each trial perturbs flows, inlet temperatures, fluid properties\n"
+          "and fouling asymptote by Gaussian noise (σ ≈ 2–15%%) and runs a\n"
+          "short dynamic simulation to settle. More trials → smoother\n"
+          "distributions. Typical: 100–500."),
+      200, 20, 2000, 50, &ok);
+  if (!ok) return;
+
+  hx::MonteCarloSettings mc;
+  mc.nTrials = nTrials;
+  mc.includeFouling = (simulationMode_ == SimulationMode::SteadyFouling
+                       || simulationMode_ == SimulationMode::DynamicFouling);
+  mc.seed = static_cast<uint32_t>(QDateTime::currentSecsSinceEpoch() & 0xffffffffu);
+
+  const int total = mc.nTrials + 2 * 13;  // 13 = max tornado params
+  QProgressDialog progress(
+      QStringLiteral("Running Monte-Carlo study..."),
+      QStringLiteral("Cancel"), 0, total, this);
+  progress.setWindowModality(Qt::WindowModal);
+  progress.setMinimumDuration(0);
+  progress.setAutoClose(false);
+  progress.setValue(0);
+
+  auto cb = [&progress](int current, int totalArg, const char *phase) -> bool {
+    progress.setMaximum(totalArg);
+    progress.setValue(current);
+    progress.setLabelText(QString::fromLatin1(phase));
+    QCoreApplication::processEvents();
+    return !progress.wasCanceled();
+  };
+
+  statusBar()->showMessage(
+      QStringLiteral("Running Monte-Carlo study (%1 trials)...").arg(mc.nTrials));
+
+  const hx::MonteCarloResult result = hx::runMonteCarlo(
+      op_, geom_, hot_, cold_, foulParams_, simConfig_, mc, cb);
+
+  progress.setValue(progress.maximum());
+  progress.close();
+
+  if (!result.ok) {
+    statusBar()->showMessage(
+        QStringLiteral("Monte-Carlo: %1").arg(QString::fromStdString(result.message)),
+        8000);
+    if (!progress.wasCanceled()) {
+      QMessageBox::warning(this, QStringLiteral("Monte-Carlo"),
+                           QString::fromStdString(result.message));
+    }
+    return;
+  }
+
+  statusBar()->showMessage(
+      QStringLiteral("Monte-Carlo complete — %1 trials. μ(Q)=%2 W, σ(Q)=%3 W.")
+          .arg(result.nTrials)
+          .arg(result.statQ.mean,   0, 'g', 4)
+          .arg(result.statQ.stddev, 0, 'g', 3),
+      10000);
+
+  auto *dlg = new MonteCarloDialog(result, this);
+  dlg->setAttribute(Qt::WA_DeleteOnClose);
+  dlg->show();
+}
+
+void MainWindow::onVibrationCheck() {
+  // Sync simConfig_/geom_/op_/fluid structs with UI (tube dims, pitch, baffles, ρ).
+  updateSimulationCore();
+
+  // Shell-side stream in this project is the cold fluid (coolant) by default.
+  // Use the cold mass flow as the crossflow driver.
+  hx::VibrationConfig vcfg;      // liquid/steel defaults
+  const hx::VibrationResult r = hx::computeVibration(geom_, cold_, hot_,
+                                                      op_.m_dot_cold, vcfg);
+
+  auto *dlg = new VibrationDialog(r, vcfg, this);
+  dlg->setAttribute(Qt::WA_DeleteOnClose);
+  dlg->show();
+
+  const char *verdict = (r.overall == hx::VibrationResult::Status::Fail)     ? "FAIL"
+                      : (r.overall == hx::VibrationResult::Status::Marginal) ? "MARGINAL"
+                                                                              : "SAFE";
+  statusBar()->showMessage(
+      QStringLiteral("Vibration check: %1  (fn = %2 Hz, V/V_crit = %3)")
+          .arg(verdict)
+          .arg(r.fn,      0, 'f', 1)
+          .arg(r.V_ratio, 0, 'f', 2),
+      8000);
+}
+
+void MainWindow::onFoulingHeatmap() {
+  // If a heatmap is already open, just bring it to the front instead of
+  // spawning a duplicate that would steal live updates from the first.
+  if (heatmapDlg_) {
+    heatmapDlg_->raise();
+    heatmapDlg_->activateWindow();
+    return;
+  }
+
+  // Sync geometry / operating-point structs with the UI first.
+  updateSimulationCore();
+
+  // Prefer the latest live Rf from the most recent simulation sample so the
+  // initial picture matches what the user is currently seeing on the charts.
+  // Fall back to the integrator's t=0 value, then the foulParams defaults.
+  double Rf_bulk = 0.0;
+  if (!simulationData_.empty()) {
+    Rf_bulk = simulationData_.back().second.Rf;
+  }
+  if (Rf_bulk <= 0.0 && fouling_) Rf_bulk = fouling_->Rf(0.0);
+  if (Rf_bulk <= 0.0) Rf_bulk = foulParams_.Rf0 > 0.0 ? foulParams_.Rf0
+                                                      : foulParams_.RfMax * 0.5;
+
+  const hx::FoulingMap map = hx::computeFoulingMap(geom_, op_, Rf_bulk, 24);
+
+  auto *dlg = new FoulingMapDialog(map, geom_, this);
+  dlg->setAttribute(Qt::WA_DeleteOnClose);
+  heatmapDlg_ = dlg;
+  heatmapSampleCounter_ = 0;
+  // Clear our pointer when the user closes the dialog so the next click
+  // creates a fresh one (and so onSimulationSample doesn't dereference it).
+  connect(dlg, &QObject::destroyed, this, [this]() {
+    heatmapDlg_ = nullptr;
+    heatmapSampleCounter_ = 0;
+  });
+  dlg->show();
+
+  statusBar()->showMessage(
+      QStringLiteral("Heatmap: %1 tubes, Rf range %2 \xE2\x80\x93 %3 (\xC3\x97 10\xE2\x81\xBB\xE2\x81\xB4 m\xC2\xB2K/W), "
+                     "hot-spot fraction = %4 %")
+          .arg(static_cast<int>(map.tubes.size()))
+          .arg(map.Rf_min * 1.0e4, 0, 'f', 3)
+          .arg(map.Rf_max * 1.0e4, 0, 'f', 3)
+          .arg(100.0 * map.hot_spot_fraction, 0, 'f', 1),
+      8000);
+}
+
+void MainWindow::onRunLog() {
+  if (!hx::RunLog::instance().isOpen()) {
+    QMessageBox::warning(this, tr("Run Log"),
+        tr("The SQLite run-log database could not be opened.\n"
+           "Check write permissions for the application data folder."));
+    return;
+  }
+  auto *dlg = new RunLogDialog(this);
+  dlg->setAttribute(Qt::WA_DeleteOnClose);
+  dlg->show();
 }
 
 QString MainWindow::simulationModeLabel(SimulationMode mode) {

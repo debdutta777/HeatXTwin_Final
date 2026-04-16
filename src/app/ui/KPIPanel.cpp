@@ -30,6 +30,14 @@ QString fmtNum(double v, int digits = 3) {
   return QString::number(v, 'f', digits);
 }
 
+// Qt's setStyleSheet triggers a full style-polish even if the string is
+// identical.  The KPI panel runs every simulator tick and assigns one of
+// three fixed palette strings per card, so gating on inequality elides
+// dozens of re-polishes per second without changing observable behaviour.
+inline void setStyleIfDifferent(QLabel *l, const QString &ss) {
+  if (l->styleSheet() != ss) l->setStyleSheet(ss);
+}
+
 }  // namespace
 
 KPIPanel::KPIPanel(QWidget *parent) : QWidget(parent) {
@@ -183,20 +191,20 @@ void KPIPanel::setCardValue(Card &card,
   if (!std::isfinite(value)) {
     card.value->setText("—");
     card.status->setText("n/a");
-    card.status->setStyleSheet(kStatusWarn);
+    setStyleIfDifferent(card.status, kStatusWarn);
     return;
   }
   card.value->setText(QString::number(value, 'f', fmt.toInt()));
 
   if (value >= goodLow && value <= goodHigh) {
     card.status->setText("healthy");
-    card.status->setStyleSheet(kStatusGood);
+    setStyleIfDifferent(card.status, kStatusGood);
   } else if (value < goodLow * 0.6 || value > goodHigh * 1.2) {
     card.status->setText("critical");
-    card.status->setStyleSheet(kStatusBad);
+    setStyleIfDifferent(card.status, kStatusBad);
   } else {
     card.status->setText("monitor");
-    card.status->setStyleSheet(kStatusWarn);
+    setStyleIfDifferent(card.status, kStatusWarn);
   }
 }
 
@@ -235,33 +243,33 @@ void KPIPanel::update(const hx::State &state,
   // 1) Q (kW)
   qCard_.value->setText(fmtNum(state.Q / 1000.0, 2));
   qCard_.status->setText(state.Q > 0 ? "transferring" : "idle");
-  qCard_.status->setStyleSheet(state.Q > 0 ? kStatusGood : kStatusWarn);
+  setStyleIfDifferent(qCard_.status, state.Q > 0 ? kStatusGood : kStatusWarn);
 
   // 2) U (W/m²K)
   uCard_.value->setText(fmtNum(state.U, 1));
-  if (state.U > 800)        { uCard_.status->setText("high");      uCard_.status->setStyleSheet(kStatusGood); }
-  else if (state.U > 300)   { uCard_.status->setText("nominal");   uCard_.status->setStyleSheet(kStatusGood); }
-  else if (state.U > 100)   { uCard_.status->setText("degraded");  uCard_.status->setStyleSheet(kStatusWarn); }
-  else                       { uCard_.status->setText("poor");      uCard_.status->setStyleSheet(kStatusBad);  }
+  if (state.U > 800)        { uCard_.status->setText("high");      setStyleIfDifferent(uCard_.status, kStatusGood); }
+  else if (state.U > 300)   { uCard_.status->setText("nominal");   setStyleIfDifferent(uCard_.status, kStatusGood); }
+  else if (state.U > 100)   { uCard_.status->setText("degraded");  setStyleIfDifferent(uCard_.status, kStatusWarn); }
+  else                       { uCard_.status->setText("poor");      setStyleIfDifferent(uCard_.status, kStatusBad);  }
 
   // 3) ε
   const double eps = (Qmax > 0) ? std::clamp(state.Q / Qmax, 0.0, 1.0)
                                 : std::numeric_limits<double>::quiet_NaN();
   effectivenessCard_.value->setText(fmtNum(eps, 3));
   if (std::isfinite(eps)) {
-    if      (eps >= 0.7) { effectivenessCard_.status->setText("excellent"); effectivenessCard_.status->setStyleSheet(kStatusGood); }
-    else if (eps >= 0.5) { effectivenessCard_.status->setText("acceptable"); effectivenessCard_.status->setStyleSheet(kStatusGood); }
-    else if (eps >= 0.3) { effectivenessCard_.status->setText("low");        effectivenessCard_.status->setStyleSheet(kStatusWarn); }
-    else                 { effectivenessCard_.status->setText("critical");   effectivenessCard_.status->setStyleSheet(kStatusBad);  }
+    if      (eps >= 0.7) { effectivenessCard_.status->setText("excellent"); setStyleIfDifferent(effectivenessCard_.status, kStatusGood); }
+    else if (eps >= 0.5) { effectivenessCard_.status->setText("acceptable"); setStyleIfDifferent(effectivenessCard_.status, kStatusGood); }
+    else if (eps >= 0.3) { effectivenessCard_.status->setText("low");        setStyleIfDifferent(effectivenessCard_.status, kStatusWarn); }
+    else                 { effectivenessCard_.status->setText("critical");   setStyleIfDifferent(effectivenessCard_.status, kStatusBad);  }
   }
 
   // 4) NTU
   const double ntu = (Cmin > 0) ? UA / Cmin : std::numeric_limits<double>::quiet_NaN();
   ntuCard_.value->setText(fmtNum(ntu, 3));
   if (std::isfinite(ntu)) {
-    if      (ntu >= 3.0) { ntuCard_.status->setText("high");    ntuCard_.status->setStyleSheet(kStatusGood); }
-    else if (ntu >= 1.0) { ntuCard_.status->setText("nominal"); ntuCard_.status->setStyleSheet(kStatusGood); }
-    else                 { ntuCard_.status->setText("low");     ntuCard_.status->setStyleSheet(kStatusWarn); }
+    if      (ntu >= 3.0) { ntuCard_.status->setText("high");    setStyleIfDifferent(ntuCard_.status, kStatusGood); }
+    else if (ntu >= 1.0) { ntuCard_.status->setText("nominal"); setStyleIfDifferent(ntuCard_.status, kStatusGood); }
+    else                 { ntuCard_.status->setText("low");     setStyleIfDifferent(ntuCard_.status, kStatusWarn); }
   }
 
   // 5) Cr
@@ -269,7 +277,7 @@ void KPIPanel::update(const hx::State &state,
   crCard_.value->setText(fmtNum(cr, 3));
   if (std::isfinite(cr)) {
     crCard_.status->setText(cr < 0.95 ? "unbalanced" : "balanced");
-    crCard_.status->setStyleSheet(kStatusGood);
+    setStyleIfDifferent(crCard_.status, kStatusGood);
   }
 
   // 6) Heat recovery (cold-side Δ over inlet ΔT)
@@ -278,9 +286,9 @@ void KPIPanel::update(const hx::State &state,
       : std::numeric_limits<double>::quiet_NaN();
   recoveryCard_.value->setText(std::isfinite(recovery) ? fmtNum(recovery * 100, 1) : QStringLiteral("—"));
   if (std::isfinite(recovery)) {
-    if      (recovery >= 0.6) { recoveryCard_.status->setText("excellent");  recoveryCard_.status->setStyleSheet(kStatusGood); }
-    else if (recovery >= 0.4) { recoveryCard_.status->setText("acceptable"); recoveryCard_.status->setStyleSheet(kStatusGood); }
-    else                      { recoveryCard_.status->setText("poor");       recoveryCard_.status->setStyleSheet(kStatusWarn); }
+    if      (recovery >= 0.6) { recoveryCard_.status->setText("excellent");  setStyleIfDifferent(recoveryCard_.status, kStatusGood); }
+    else if (recovery >= 0.4) { recoveryCard_.status->setText("acceptable"); setStyleIfDifferent(recoveryCard_.status, kStatusGood); }
+    else                      { recoveryCard_.status->setText("poor");       setStyleIfDifferent(recoveryCard_.status, kStatusWarn); }
   }
 
   // 7) Fouling penalty
@@ -289,9 +297,9 @@ void KPIPanel::update(const hx::State &state,
       : std::numeric_limits<double>::quiet_NaN();
   foulingPenaltyCard_.value->setText(std::isfinite(penalty) ? fmtNum(penalty * 100, 1) : QStringLiteral("—"));
   if (std::isfinite(penalty)) {
-    if      (penalty < 0.05) { foulingPenaltyCard_.status->setText("clean");    foulingPenaltyCard_.status->setStyleSheet(kStatusGood); }
-    else if (penalty < 0.20) { foulingPenaltyCard_.status->setText("fouling");  foulingPenaltyCard_.status->setStyleSheet(kStatusWarn); }
-    else                     { foulingPenaltyCard_.status->setText("severe");   foulingPenaltyCard_.status->setStyleSheet(kStatusBad);  }
+    if      (penalty < 0.05) { foulingPenaltyCard_.status->setText("clean");    setStyleIfDifferent(foulingPenaltyCard_.status, kStatusGood); }
+    else if (penalty < 0.20) { foulingPenaltyCard_.status->setText("fouling");  setStyleIfDifferent(foulingPenaltyCard_.status, kStatusWarn); }
+    else                     { foulingPenaltyCard_.status->setText("severe");   setStyleIfDifferent(foulingPenaltyCard_.status, kStatusBad);  }
   }
 
   // 8) Tube dP margin
@@ -300,9 +308,9 @@ void KPIPanel::update(const hx::State &state,
       : std::numeric_limits<double>::quiet_NaN();
   tubeDpMarginCard_.value->setText(std::isfinite(tubeMargin) ? fmtNum(tubeMargin * 100, 1) : QStringLiteral("—"));
   if (std::isfinite(tubeMargin)) {
-    if      (tubeMargin >= 0.3) { tubeDpMarginCard_.status->setText("safe");      tubeDpMarginCard_.status->setStyleSheet(kStatusGood); }
-    else if (tubeMargin >= 0.0) { tubeDpMarginCard_.status->setText("near limit"); tubeDpMarginCard_.status->setStyleSheet(kStatusWarn); }
-    else                        { tubeDpMarginCard_.status->setText("exceeded");  tubeDpMarginCard_.status->setStyleSheet(kStatusBad);  }
+    if      (tubeMargin >= 0.3) { tubeDpMarginCard_.status->setText("safe");      setStyleIfDifferent(tubeDpMarginCard_.status, kStatusGood); }
+    else if (tubeMargin >= 0.0) { tubeDpMarginCard_.status->setText("near limit"); setStyleIfDifferent(tubeDpMarginCard_.status, kStatusWarn); }
+    else                        { tubeDpMarginCard_.status->setText("exceeded");  setStyleIfDifferent(tubeDpMarginCard_.status, kStatusBad);  }
   }
 
   // 9) Shell dP margin
@@ -311,9 +319,9 @@ void KPIPanel::update(const hx::State &state,
       : std::numeric_limits<double>::quiet_NaN();
   shellDpMarginCard_.value->setText(std::isfinite(shellMargin) ? fmtNum(shellMargin * 100, 1) : QStringLiteral("—"));
   if (std::isfinite(shellMargin)) {
-    if      (shellMargin >= 0.3) { shellDpMarginCard_.status->setText("safe");       shellDpMarginCard_.status->setStyleSheet(kStatusGood); }
-    else if (shellMargin >= 0.0) { shellDpMarginCard_.status->setText("near limit"); shellDpMarginCard_.status->setStyleSheet(kStatusWarn); }
-    else                         { shellDpMarginCard_.status->setText("exceeded");   shellDpMarginCard_.status->setStyleSheet(kStatusBad);  }
+    if      (shellMargin >= 0.3) { shellDpMarginCard_.status->setText("safe");       setStyleIfDifferent(shellDpMarginCard_.status, kStatusGood); }
+    else if (shellMargin >= 0.0) { shellDpMarginCard_.status->setText("near limit"); setStyleIfDifferent(shellDpMarginCard_.status, kStatusWarn); }
+    else                         { shellDpMarginCard_.status->setText("exceeded");   setStyleIfDifferent(shellDpMarginCard_.status, kStatusBad);  }
   }
 
   // Silence unused-parameter warnings on variables only used via fmt helpers.
