@@ -12,7 +12,8 @@
       "Bash(cmake --build . --config Release --target HeatXTwin_Pro)",
       "Bash(cmake ..)",
       "Bash(cmake --build . --config Release)",
-      "Bash(ls build*)"
+      "Bash(ls build*)",
+      "Bash(cmake --build . --config Release --target HeatXTwin_Pro -- /v:n)"
     ]
   }
 }
